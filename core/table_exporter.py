@@ -410,7 +410,7 @@ class TableExporter:
         # Убираем: cap_gain_pct, div_return_pct, total_return_pct, cagr_pct
         columns_to_keep = [
             'ticker', 'name', 'year', 'price', 'yoy_change_pct',
-            'div_annual', 'avg_cost', 'yield_on_cost', 'total_div_received',
+            'div_annual', 'avg_cost', 'yield_on_cost', 'total_div_received', 'div_received',
             'total_invested', 'portfolio_value', 'net_result',
             'reason_short', 'reason_long'
         ]
@@ -423,11 +423,12 @@ class TableExporter:
         final_df = final_df.rename(columns={
             'year': 'date',
             'yoy_change_pct': 'yoy_change',
-            'total_div_received': 'cum_div'  # Меняем только одну колонку
+            'total_div_received': 'cum_div',  # Накопленные дивиденды
+            'div_received': 'total_div_received'  # Дивиденды за этот год
         })
 
-        # 6. Добавляем total_div_received как отдельную колонку (дублирование cum_div)
-        final_df['total_div_received'] = final_df['cum_div']
+        # # 6. Добавляем total_div_received как отдельную колонку (дублирование cum_div)
+        # final_df['total_div_received'] = final_df['cum_div']
 
         # 7. Форматируем числа
         # Округляем денежные значения до 2 знаков
@@ -446,8 +447,8 @@ class TableExporter:
         # 8. Устанавливаем порядок колонок (18 колонок)
         final_column_order = [
             'ticker', 'name', 'date', 'price', 'yoy_change', 'div_annual',
-            'avg_cost', 'yield_on_cost', 'cum_div', 'total_invested',
-            'portfolio_value', 'total_div_received', 'net_result',
+            'avg_cost', 'yield_on_cost', 'total_invested', 'portfolio_value',
+            'total_div_received', 'cum_div', 'net_result',
             'reason_short', 'reason_long'
         ]
 
