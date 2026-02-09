@@ -11,6 +11,39 @@ ANNUAL_INVESTMENT = 1000.0  # Фиксированная сумма ежегод
 START_YEAR = 2000  # Год начала инвестирования (анализа)
 END_YEAR = 2023  # Год окончания инвестирования (анализа)
 TICKER = "JNJ"  # Тикер анализируемой бумаги
+COMPANY_NAMES = {
+    'JNJ': 'Johnson & Johnson',
+    'PG': 'Procter & Gamble',
+    'KO': 'Coca-Cola',
+    'MCD': 'McDonald\'s',
+    'O': 'Realty Income',
+    'JPM': 'JPMorgan Chase',
+    'BAC': 'Bank of America',
+    'BLK': 'BlackRock',
+    'AVGO': 'Broadcom Inc.',
+    'TXN': 'Texas Instruments',
+    'XOM': 'Exxon Mobil',
+    'CVX': 'Chevron',
+    'MMM': '3M Company',
+    'ABBV': 'AbbVie',
+    'AMT': 'American Tower',
+    'CCI': 'Crown Castle',
+    'MSFT': 'Microsoft',
+    'AAPL': 'Apple',
+    'LOW': 'Lowe\'s',
+    'HD': 'Home Depot',
+    'PM': 'Philip Morris',
+    'MO': 'Altria Group',
+    'KHC': 'Kraft Heinz',
+    'PEP': 'PepsiCo',
+    'WMT': 'Walmart',
+    'TGT': 'Target',
+    'NEE': 'NextEra Energy',
+    'SO': 'Southern Company',
+    'DUK': 'Duke Energy',
+    'IBM': 'International Business Machines',
+    'VZ': 'Verizon'
+}
 
 # Обработка дивидендов. True - реинвестировать, False - копить как кэш.
 # ВНИМАНИЕ: На текущий момент реализована ТОЛЬКО стратегия с реинвестированием (True).

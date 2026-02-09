@@ -16,6 +16,7 @@ from core.config import (
 from core.data_provider import get_data_provider
 from core.data_validator import get_validator
 from core.portfolio_simulator import PortfolioSimulator
+from core.table_exporter import get_table_exporter
 
 # Настройка логирования
 logging.basicConfig(
@@ -89,6 +90,7 @@ class AnalysisOrchestrator:
             ('load_data', self._step_load_data),
             ('validate_data', self._step_validate_data),
             ('simulate_portfolio', self._step_simulate_portfolio),
+            ('export_tables', self._step_export_tables),
             # Здесь будут добавлены этапы:
             # ('generate_reports', self._step_generate_reports)
         ]
@@ -333,6 +335,87 @@ class AnalysisOrchestrator:
             Словарь с результатами симуляции или None.
         """
         return self.results.get('portfolio_simulation')
+
+    def _step_export_tables(self) -> bool:
+        """Этап 5: Экспорт результатов в табличные форматы (CSV, Excel, JSON)."""
+        try:
+            # Проверяем наличие необходимых данных
+            if self.results.get('simulation_df') is None:
+                logger.error("Нет данных симуляции для экспорта")
+                return False
+
+            simulation_df = self.results['simulation_df']
+            source_df = self.results.get('filtered_data')
+            summary_metrics = self.results.get('simulation_summary', {})
+            validation_result = self.results.get('validation_report', {})
+
+            # Получаем экспортёр
+            exporter = get_table_exporter()
+
+            # 1. Экспортируем таблицу симуляции
+            sim_files = exporter.export_simulation_table(
+                simulation_df=simulation_df,
+                source_df=source_df,
+                ticker=self.ticker,
+                start_year=self.start_year,
+                end_year=self.end_year,
+                annual_investment=self.annual_investment,
+                reinvest_div=self.reinvest_dividends,
+                formats=['xlsx', 'csv'],
+                export_final_report=True
+            )
+
+            # 2. Экспортируем сводные метрики
+            if summary_metrics:
+                summary_files = exporter.export_summary_table(
+                    summary_metrics=summary_metrics,
+                    ticker=self.ticker,
+                    start_year=self.start_year,
+                    end_year=self.end_year,
+                    annual_investment=self.annual_investment,
+                    reinvest_div=self.reinvest_dividends,
+                    formats=['json', 'xlsx']
+                )
+            else:
+                summary_files = {}
+                logger.warning("Нет сводных метрик для экспорта")
+
+            # 3. Экспортируем отчёт валидации
+            if validation_result:
+                validation_file = exporter.export_validation_report(
+                    validation_result=validation_result,
+                    ticker=self.ticker,
+                    start_year=self.start_year,
+                    end_year=self.end_year,
+                    annual_investment=self.annual_investment,
+                    reinvest_div=self.reinvest_dividends
+                )
+            else:
+                validation_file = None
+                logger.warning("Нет отчёта валидации для экспорта")
+
+            # Сохраняем информацию о созданных файлах
+            self.results['exported_files'] = {
+                'simulation': sim_files,
+                'summary': summary_files,
+                'validation': validation_file
+            }
+
+            # Логируем результаты
+            total_files = len(sim_files) + len(summary_files) + (1 if validation_file else 0)
+            logger.info(f"✓ Экспорт таблиц завершён. Создано файлов: {total_files}")
+
+            # Выводим пути к основным файлам
+            if 'xlsx' in sim_files:
+                logger.info(f"  Основной файл: {sim_files['xlsx'].name}")
+            if 'json' in summary_files:
+                logger.info(f"  Сводные метрики: {summary_files['json'].name}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Ошибка экспорта таблиц: {e}")
+            return False
 
 
 # Фабричная функция для удобства
