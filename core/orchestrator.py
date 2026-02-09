@@ -15,6 +15,7 @@ from core.config import (
 )
 from core.data_provider import get_data_provider
 from core.data_validator import get_validator
+from core.portfolio_simulator import PortfolioSimulator
 
 # Настройка логирования
 logging.basicConfig(
@@ -87,8 +88,8 @@ class AnalysisOrchestrator:
             ('setup_directories', self._step_setup_directories),
             ('load_data', self._step_load_data),
             ('validate_data', self._step_validate_data),
+            ('simulate_portfolio', self._step_simulate_portfolio),
             # Здесь будут добавлены этапы:
-            # ('simulate_portfolio', self._step_simulate_portfolio),
             # ('generate_reports', self._step_generate_reports)
         ]
 
@@ -277,6 +278,62 @@ class AnalysisOrchestrator:
         """
         return self.results['validation_report']
 
+    def _step_simulate_portfolio(self) -> bool:
+        """Этап 4: Симуляция портфеля по стратегии DCA."""
+        try:
+            filtered_data = self.results['filtered_data']
+            if filtered_data is None:
+                logger.error("Нет данных для симуляции")
+                return False
+
+            # Проверяем, что данные прошли валидацию (в strict mode)
+            if self.strict_validation:
+                validation_result = self.results['validation_report']
+                if validation_result and not validation_result['is_valid']:
+                    logger.error("Данные не прошли валидацию. Симуляция прервана.")
+                    return False
+
+            simulator = PortfolioSimulator(
+                annual_investment=self.annual_investment,
+                reinvest_dividends=self.reinvest_dividends
+            )
+
+            simulation_results = simulator.simulate(
+                filtered_data,
+                start_year=self.start_year,
+                end_year=self.end_year
+            )
+
+            self.results['portfolio_simulation'] = simulation_results
+            self.results['simulation_df'] = simulation_results['simulation_df']
+            self.results['simulation_summary'] = simulation_results['summary']
+            self.results['simulation_params'] = simulation_results['parameters']
+
+            logger.info(f"✓ Симуляция портфеля завершена")
+            logger.info(f"  Период: {self.start_year}-{self.end_year}")
+            logger.info(f"  Чистая прибыль: ${simulation_results['summary']['net_result']:.2f}")
+            logger.info(f"  ROI: {simulation_results['summary']['roi_pct']:.1f}%")
+
+            return True
+
+        except NotImplementedError as e:
+            logger.error(f"Ошибка конфигурации симулятора: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Ошибка симуляции портфеля: {e}")
+            return False
+
+    def get_simulation_results(self) -> Optional[Dict[str, Any]]:
+        """
+        Возвращает результаты симуляции портфеля.
+
+        Returns
+        -------
+        Optional[Dict[str, Any]]
+            Словарь с результатами симуляции или None.
+        """
+        return self.results.get('portfolio_simulation')
+
 
 # Фабричная функция для удобства
 def create_orchestrator(
@@ -311,12 +368,12 @@ if __name__ == "__main__":
     print("-" * 50)
 
     orchestrator = create_orchestrator(
-        ticker="JNJ",
-        start_year=2000,
-        end_year=2023,
-        annual_investment=1000,
-        reinvest_dividends=True,
-        strict_validation=False  # Для теста не строгий режим
+        ticker=TICKER,
+        start_year=START_YEAR,
+        end_year=END_YEAR,
+        annual_investment=ANNUAL_INVESTMENT,
+        reinvest_dividends=REINVEST_DIVIDENDS,
+        strict_validation=False
     )
 
     results = orchestrator.run()
