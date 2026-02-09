@@ -220,7 +220,7 @@ class PortfolioSimulator:
         df['avg_cost'] = df['avg_cost'].replace([np.inf, -np.inf], np.nan)
 
         # 2. Доходность на成本 (Yield on Cost)
-        df['yield_on_cost'] = (df['div_annual'] / df['avg_cost']) * 100
+        df['yield_on_cost'] = (df['div_annual'] * df['total_shares'] / df['total_invested']) * 100
 
         # 3. Прирост капитала в процентах
         df['cap_gain_pct'] = ((df['portfolio_value'] - df['total_invested']) /
