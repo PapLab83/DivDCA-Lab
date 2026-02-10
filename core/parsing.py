@@ -34,12 +34,13 @@ COMPANY_NAMES = {
     'IBM': 'International Business Machines',
     'VZ': 'Verizon'
 }
+COMPANY = "JPM"
 
 # Получаем данные
-ticker = yf.Ticker("PG")
+ticker = yf.Ticker(COMPANY)
 
 # Получаем исторические данные
-hist = ticker.history(start="1970-01-01", end="2025-12-31")
+hist = ticker.history(start="1985-01-01", end="2025-12-31")
 
 print("Колонки:")
 print(hist.columns.tolist())
@@ -74,7 +75,7 @@ print(result.to_string(index=False, na_rep='-'))
 
 # Отдельно выводим только годы со сплитами (для наглядности)
 print("\n" + "=" * 60)
-print("Годы со сплитами акций PG:")
+print(f"Годы со сплитами акций {COMPANY}:")
 splits_years = result[result['stock_splits'] != 1.0]
 if not splits_years.empty:
     for _, row in splits_years.iterrows():
@@ -95,7 +96,7 @@ else:
 
 # Дополнительная информация о сплитах
 print("\n" + "=" * 60)
-print("Полная история сплитов PG (все доступные данные):")
+print(f"Полная история сплитов {COMPANY} (все доступные данные):")
 all_splits = ticker.splits
 if not all_splits.empty:
     for date, split_value in all_splits.items():
@@ -111,5 +112,5 @@ else:
     print("История сплитов не найдена.")
 
 # Сохраняем в CSV для дальнейшего анализа
-result.to_csv('PG_annual_data_with_splits.csv', index=False)
-print(f"\nДанные сохранены в файл: PG_annual_data_with_splits.csv")
+# result.to_csv(f'{COMPANY}_annual_data_with_splits.csv', index=False)
+# print(f"\nДанные сохранены в файл: {COMPANY}_annual_data_with_splits.csv")
