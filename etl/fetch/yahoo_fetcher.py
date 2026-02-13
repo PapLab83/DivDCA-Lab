@@ -1,39 +1,6 @@
 import yfinance as yf
-import pandas as pd
 
-COMPANY_NAMES = {
-    'JNJ': 'Johnson & Johnson',
-    'PG': 'Procter & Gamble',
-    'KO': 'Coca-Cola',
-    'MCD': 'McDonald\'s',
-    'O': 'Realty Income',
-    'JPM': 'JPMorgan Chase',
-    'BAC': 'Bank of America',
-    'BLK': 'BlackRock',
-    'AVGO': 'Broadcom Inc.',
-    'TXN': 'Texas Instruments',
-    'XOM': 'Exxon Mobil',
-    'CVX': 'Chevron',
-    'MMM': '3M Company',
-    'ABBV': 'AbbVie',
-    'AMT': 'American Tower',
-    'CCI': 'Crown Castle',
-    'MSFT': 'Microsoft',
-    'AAPL': 'Apple',
-    'LOW': 'Lowe\'s',
-    'HD': 'Home Depot',
-    'PM': 'Philip Morris',
-    'MO': 'Altria Group',
-    'KHC': 'Kraft Heinz',
-    'PEP': 'PepsiCo',
-    'WMT': 'Walmart',
-    'TGT': 'Target',
-    'NEE': 'NextEra Energy',
-    'SO': 'Southern Company',
-    'DUK': 'Duke Energy',
-    'IBM': 'International Business Machines',
-    'VZ': 'Verizon'
-}
+
 COMPANY = "JPM"
 
 # Получаем данные
@@ -110,7 +77,3 @@ if not all_splits.empty:
         print(f"{date_str}: {ratio}")
 else:
     print("История сплитов не найдена.")
-
-# Сохраняем в CSV для дальнейшего анализа
-# result.to_csv(f'{COMPANY}_annual_data_with_splits.csv', index=False)
-# print(f"\nДанные сохранены в файл: {COMPANY}_annual_data_with_splits.csv")

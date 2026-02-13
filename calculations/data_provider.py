@@ -3,11 +3,11 @@
 """
 import json
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 import pandas as pd
 from pandas import DataFrame
 
-from core.config import get_data_path, TICKER, START_YEAR, END_YEAR
+from config.config import get_data_path, TICKER, START_YEAR, END_YEAR
 
 
 class LocalJsonDataProvider:

@@ -8,7 +8,7 @@ from pandas import DataFrame
 import numpy as np
 import logging
 
-from core.config import ANNUAL_INVESTMENT, REINVEST_DIVIDENDS
+from config.config import ANNUAL_INVESTMENT, REINVEST_DIVIDENDS
 
 logger = logging.getLogger(__name__)
 

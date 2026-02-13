@@ -8,7 +8,7 @@ import pandas as pd
 from pandas import DataFrame
 import logging
 
-from core.config import TABLES_DIR, generate_report_filename
+from config.config import TABLES_DIR, generate_report_filename
 
 logger = logging.getLogger(__name__)
 
@@ -321,7 +321,7 @@ class TableExporter:
         DataFrame
             Отформатированный DataFrame с 18 колонками.
         """
-        from core.config import COMPANY_NAMES
+        from config.config import COMPANY_NAMES
 
         # 1. Объединяем данные
         # Проверяем, что есть колонка year в обоих DataFrame

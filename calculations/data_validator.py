@@ -2,12 +2,11 @@
 Модуль для расширенной валидации исторических данных.
 Проверяет логическую целостность, отсутствие аномалий и соответствие бизнес-правилам.
 """
-from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import List, Tuple, Optional
 import pandas as pd
-from pandas import DataFrame, Series
+from pandas import DataFrame
 
-from core.config import START_YEAR, END_YEAR, TICKER
+from config.config import START_YEAR, END_YEAR, TICKER
 
 
 class DataValidator:
@@ -272,7 +271,7 @@ def get_validator(strict_mode: bool = True) -> DataValidator:
 
 if __name__ == "__main__":
     # Тест валидатора с загрузкой данных
-    from core.data_provider import get_data_provider
+    from calculations.data_provider import get_data_provider
 
     try:
         provider = get_data_provider()

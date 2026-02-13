@@ -3,20 +3,18 @@
 Управляет последовательностью этапов: загрузка данных → валидация → расчёт → отчёт.
 """
 import time
-from pathlib import Path
 from typing import Dict, Any, Optional, Callable
-import pandas as pd
 from pandas import DataFrame
 import logging
 
-from core.config import (
+from config.config import (
     TICKER, START_YEAR, END_YEAR, ANNUAL_INVESTMENT, REINVEST_DIVIDENDS,
-    TABLES_DIR, GRAPHS_DIR, generate_report_filename, setup_project_dirs
+    setup_project_dirs
 )
-from core.data_provider import get_data_provider
-from core.data_validator import get_validator
-from core.portfolio_simulator import PortfolioSimulator
-from core.table_exporter import get_table_exporter
+from calculations.data_provider import get_data_provider
+from calculations.data_validator import get_validator
+from calculations.portfolio_simulator import PortfolioSimulator
+from calculations.table_exporter import get_table_exporter
 
 # Настройка логирования
 logging.basicConfig(
