@@ -346,14 +346,12 @@ class AnalysisOrchestrator:
 
             simulation_df = self.results['simulation_df']
             source_df = self.results.get('filtered_data')
-            summary_metrics = self.results.get('simulation_summary', {})
-            validation_result = self.results.get('validation_report', {})
 
             # Получаем экспортёр
             exporter = get_table_exporter()
 
             # 1. Экспортируем таблицу симуляции
-            sim_files = exporter.export_simulation_table(
+            _ = exporter.export_simulation_table(
                 simulation_df=simulation_df,
                 source_df=source_df,
                 ticker=self.ticker,
@@ -365,51 +363,6 @@ class AnalysisOrchestrator:
                 export_final_report=True
             )
 
-            # 2. Экспортируем сводные метрики
-            if summary_metrics:
-                summary_files = exporter.export_summary_table(
-                    summary_metrics=summary_metrics,
-                    ticker=self.ticker,
-                    start_year=self.start_year,
-                    end_year=self.end_year,
-                    annual_investment=self.annual_investment,
-                    reinvest_div=self.reinvest_dividends,
-                    formats=['json', 'xlsx']
-                )
-            else:
-                summary_files = {}
-                logger.warning("Нет сводных метрик для экспорта")
-
-            # 3. Экспортируем отчёт валидации
-            if validation_result:
-                validation_file = exporter.export_validation_report(
-                    validation_result=validation_result,
-                    ticker=self.ticker,
-                    start_year=self.start_year,
-                    end_year=self.end_year,
-                    annual_investment=self.annual_investment,
-                    reinvest_div=self.reinvest_dividends
-                )
-            else:
-                validation_file = None
-                logger.warning("Нет отчёта валидации для экспорта")
-
-            # Сохраняем информацию о созданных файлах
-            self.results['exported_files'] = {
-                'simulation': sim_files,
-                'summary': summary_files,
-                'validation': validation_file
-            }
-
-            # Логируем результаты
-            total_files = len(sim_files) + len(summary_files) + (1 if validation_file else 0)
-            logger.info(f"✓ Экспорт таблиц завершён. Создано файлов: {total_files}")
-
-            # Выводим пути к основным файлам
-            if 'xlsx' in sim_files:
-                logger.info(f"  Основной файл: {sim_files['xlsx'].name}")
-            if 'json' in summary_files:
-                logger.info(f"  Сводные метрики: {summary_files['json'].name}")
 
             return True
 

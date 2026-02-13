@@ -80,21 +80,6 @@ class TableExporter:
         Dict[str, Path]
             Словарь {формат: путь_к_файлу} созданных файлов.
         """
-        if formats is None:
-            formats = ['xlsx', 'csv']
-
-        # Подготавливаем DataFrame для экспорта
-        export_df = self._prepare_simulation_df(simulation_df)
-
-        # Генерируем базовое имя файла
-        base_name = generate_report_filename(
-            prefix='simulation',
-            ticker=ticker,
-            start_year=start_year,
-            end_year=end_year,
-            annual_investment=annual_investment,
-            reinvest_div=reinvest_div
-        )
 
         # Экспортируем в указанные форматы
         exported_files = {}
@@ -112,46 +97,14 @@ class TableExporter:
                     reinvest_div=reinvest_div
                 )
 
-                # Экспортируем финальный отчёт в запрошенные форматы
-                for fmt in formats:
-                    if fmt == 'csv':
-                        file_path = self.output_dir / f"{base_name_final}.csv"
-                        final_df.to_csv(file_path, index=False, encoding='utf-8')
-                        exported_files['final_csv'] = file_path
-                        logger.debug(f"Создан финальный CSV: {file_path}")
-                    elif fmt == 'xlsx':
-                        file_path = self.output_dir / f"{base_name_final}.xlsx"
-                        final_df.to_excel(file_path, index=False)
-                        exported_files['final_xlsx'] = file_path
-                        logger.debug(f"Создан финальный Excel: {file_path}")
-                    # JSON пока не поддерживаем для финального отчёта
+                # # Экспортируем финальный отчёт в запрошенные форматы
+                file_path = self.output_dir / f"{base_name_final}.xlsx"
+                final_df.to_excel(file_path, index=False)
+                exported_files['final_xlsx'] = file_path
+                logger.debug(f"Создан финальный Excel: {file_path}")
 
             except Exception as e:
                 logger.warning(f"Не удалось создать финальный отчёт: {e}")
-
-        # 2. Генерируем базовое имя файла для полной симуляции
-        base_name = generate_report_filename(
-            prefix='simulation',
-            ticker=ticker,
-            start_year=start_year,
-            end_year=end_year,
-            annual_investment=annual_investment,
-            reinvest_div=reinvest_div
-        )
-
-        # 3. Экспортируем полную симуляцию в указанные форматы
-        for fmt in formats:
-            if fmt not in self._EXPORT_METHODS:
-                logger.warning(f"Формат {fmt} не поддерживается. Пропускаем.")
-                continue
-
-            method_name = self._EXPORT_METHODS[fmt]
-            method = getattr(self, method_name)
-            file_path = method(export_df, base_name)
-
-            # Добавляем в словарь с префиксом 'full_' чтобы отличать от финального
-            key = f'full_{fmt}'
-            exported_files[key] = file_path
 
         logger.info(f"Экспортирована таблица симуляции: {len(exported_files)} файлов")
         return exported_files
