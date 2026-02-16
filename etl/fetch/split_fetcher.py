@@ -30,6 +30,7 @@ class SplitFetcher(BaseFetcher):
             ticker: str,
             start_date: str,
             end_date: str,
+            frequency: str = 'YE',
             provider: Optional[DataProvider] = None,
             include_description: bool = True,
             **kwargs
@@ -52,7 +53,7 @@ class SplitFetcher(BaseFetcher):
         **kwargs
             Дополнительные параметры для базового класса
         """
-        super().__init__(ticker, start_date, end_date, provider, **kwargs)
+        super().__init__(ticker, start_date, end_date, frequency=frequency, provider=provider, **kwargs)
 
         self.include_description = include_description
         self.logger.info(f"Фетчер сплитов инициализирован (include_description={include_description})")

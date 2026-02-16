@@ -44,36 +44,20 @@ class YahooProvider(DataProvider):
         return self._ticker_cache[ticker]
 
     def get_prices(self, ticker: str, start: str, end: str) -> pd.DataFrame:
-        """
-        Получение исторических цен из Yahoo Finance.
-
-        Parameters
-        ----------
-        ticker : str
-            Тикер инструмента (например, 'JPM', 'AAPL')
-        start : str
-            Начальная дата в формате 'YYYY-MM-DD'
-        end : str
-            Конечная дата в формате 'YYYY-MM-DD'
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame с индексом DatetimeIndex и колонками Open, High, Low, Close, Volume
-        """
         logger.info(f"Загрузка цен для {ticker} за период {start} - {end}")
 
         try:
-            # Получаем сырые данные от Yahoo
             ticker_obj = self._get_ticker(ticker)
             raw_data = ticker_obj.history(start=start, end=end)
 
             if raw_data.empty:
                 logger.warning(f"Нет данных о ценах для {ticker} за указанный период")
-                # Возвращаем пустой DataFrame с правильными колонками
                 return pd.DataFrame(columns=['Open', 'High', 'Low', 'Close', 'Volume'])
 
-            # Приводим к единому формату
+            # Убираем таймзону из индекса
+            if raw_data.index.tz is not None:
+                raw_data.index = raw_data.index.tz_localize(None)
+
             result = pd.DataFrame(index=raw_data.index)
             result['Open'] = raw_data['Open'].astype(float)
             result['High'] = raw_data['High'].astype(float)
@@ -81,10 +65,7 @@ class YahooProvider(DataProvider):
             result['Close'] = raw_data['Close'].astype(float)
             result['Volume'] = raw_data['Volume'].astype(float)
 
-            # Гарантируем DatetimeIndex
             result = self._ensure_datetime_index(result)
-
-            # Заполняем пропуски (выходные и праздники)
             result = self._fill_missing_dates(result, freq='D')
 
             logger.info(f"Загружено {len(result)} записей о ценах для {ticker}")
@@ -95,27 +76,9 @@ class YahooProvider(DataProvider):
             raise
 
     def get_dividends(self, ticker: str, start: str, end: str) -> pd.Series:
-        """
-        Получение истории дивидендов из Yahoo Finance.
-
-        Parameters
-        ----------
-        ticker : str
-            Тикер инструмента
-        start : str
-            Начальная дата в формате 'YYYY-MM-DD'
-        end : str
-            Конечная дата в формате 'YYYY-MM-DD'
-
-        Returns
-        -------
-        pd.Series
-            Series с индексом DatetimeIndex (даты выплат) и значениями float (суммы дивидендов)
-        """
         logger.info(f"Загрузка дивидендов для {ticker} за период {start} - {end}")
 
         try:
-            # Получаем сырые данные от Yahoo
             ticker_obj = self._get_ticker(ticker)
             raw_dividends = ticker_obj.dividends
 
@@ -123,13 +86,17 @@ class YahooProvider(DataProvider):
                 logger.info(f"Нет данных о дивидендах для {ticker}")
                 return pd.Series(dtype=float)
 
+            # Убираем таймзону из индекса
+            if raw_dividends.index.tz is not None:
+                raw_dividends.index = raw_dividends.index.tz_localize(None)
+
             # Фильтруем по периоду
-            mask = (raw_dividends.index >= start) & (raw_dividends.index <= end)
+            start_ts = pd.Timestamp(start)
+            end_ts = pd.Timestamp(end)
+            mask = (raw_dividends.index >= start_ts) & (raw_dividends.index <= end_ts)
             filtered = raw_dividends[mask]
 
-            # Приводим к единому формату
             result = filtered.astype(float)
-            result = self._ensure_datetime_index(result.to_frame())[result.name]
 
             logger.info(f"Загружено {len(result)} записей о дивидендах для {ticker}")
             return result
@@ -139,27 +106,9 @@ class YahooProvider(DataProvider):
             raise
 
     def get_splits(self, ticker: str, start: str, end: str) -> pd.Series:
-        """
-        Получение истории сплитов из Yahoo Finance.
-
-        Parameters
-        ----------
-        ticker : str
-            Тикер инструмента
-        start : str
-            Начальная дата в формате 'YYYY-MM-DD'
-        end : str
-            Конечная дата в формате 'YYYY-MM-DD'
-
-        Returns
-        -------
-        pd.Series
-            Series с индексом DatetimeIndex (даты сплитов) и значениями float (коэффициенты)
-        """
         logger.info(f"Загрузка сплитов для {ticker} за период {start} - {end}")
 
         try:
-            # Получаем сырые данные от Yahoo
             ticker_obj = self._get_ticker(ticker)
             raw_splits = ticker_obj.splits
 
@@ -167,13 +116,17 @@ class YahooProvider(DataProvider):
                 logger.info(f"Нет данных о сплитах для {ticker}")
                 return pd.Series(dtype=float)
 
+            # Убираем таймзону из индекса
+            if raw_splits.index.tz is not None:
+                raw_splits.index = raw_splits.index.tz_localize(None)
+
             # Фильтруем по периоду
-            mask = (raw_splits.index >= start) & (raw_splits.index <= end)
+            start_ts = pd.Timestamp(start)
+            end_ts = pd.Timestamp(end)
+            mask = (raw_splits.index >= start_ts) & (raw_splits.index <= end_ts)
             filtered = raw_splits[mask]
 
-            # Приводим к единому формату
             result = filtered.astype(float)
-            result = self._ensure_datetime_index(result.to_frame())[result.name]
 
             logger.info(f"Загружено {len(result)} записей о сплитах для {ticker}")
             return result
@@ -207,3 +160,28 @@ class YahooProvider(DataProvider):
         except Exception as e:
             logger.debug(f"Тикер {ticker} не найден в Yahoo Finance: {e}")
             return False
+
+    def _fill_missing_dates(self, data: pd.DataFrame, freq: str = 'D') -> pd.DataFrame:
+        """
+        Вспомогательный метод: заполняет пропущенные даты forward fill'ом.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            DataFrame с DatetimeIndex
+        freq : str
+            Частота передискретизации ('D' - дневная, 'B' - рабочие дни и т.д.)
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame с непрерывным индексом дат
+        """
+        # Создаем полный диапазон дат
+        full_range = pd.date_range(start=data.index.min(),
+                                   end=data.index.max(),
+                                   freq=freq)
+
+        # Переиндексируем и заполняем пропуски
+        # Исправление: убираем method, используем ffill()
+        return data.reindex(full_range).ffill()

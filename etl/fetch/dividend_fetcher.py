@@ -74,6 +74,7 @@ class DividendFetcher(BaseFetcher):
         -------
         List[Dict[str, Any]]
             Список записей с полями date, year, dividend
+            Включает ВСЕ даты из периода, для лет без дивидендов dividend = 0
         """
         self.logger.info(f"Начало загрузки дивидендов для {self.ticker}")
 
@@ -86,19 +87,35 @@ class DividendFetcher(BaseFetcher):
 
         if raw_dividends.empty:
             self.logger.info(f"Нет данных о дивидендах для {self.ticker} за указанный период")
-            return []
+            # Создаем пустой Series с правильным индексом
+            all_dates = pd.date_range(start=self.start_date, end=self.end_date, freq=self.frequency)
+            aggregated = pd.Series(0.0, index=all_dates)
+        else:
+            self.logger.info(f"Получено {len(raw_dividends)} сырых записей о дивидендах")
 
-        self.logger.info(f"Получено {len(raw_dividends)} сырых записей о дивидендах")
+            # 2. Агрегируем по периодам
+            aggregated = self._aggregate_dividends(raw_dividends)
 
-        # Показываем примеры выплат
-        if len(raw_dividends) > 0:
-            sample = raw_dividends.head(3)
-            self.logger.debug(f"Примеры выплат: {sample.to_dict()}")
+            # 3. Создаем полный ряд дат за период
+            all_dates = pd.date_range(start=self.start_date, end=self.end_date, freq=self.frequency)
 
-        # 2. Агрегируем по периодам
-        aggregated = self._aggregate_dividends(raw_dividends)
+            # 4. Создаем Series со всеми датами (заполняем 0, потом обновляем из aggregated)
+            full_series = pd.Series(0.0, index=all_dates)
 
-        # 3. Преобразуем в список словарей
+            # 5. Обновляем значения там, где они есть в aggregated
+            for date, value in aggregated.items():
+                if date in full_series.index:
+                    full_series[date] = value
+                else:
+                    # На случай если дата из aggregated не точно совпадает
+                    # Ищем ближайшую дату в full_series
+                    closest_date = full_series.index.asof(date)
+                    if closest_date is not pd.NaT:
+                        full_series[closest_date] = value
+
+            aggregated = full_series
+
+        # 6. Преобразуем в список словарей
         records = []
         for date, value in aggregated.items():
             records.append({
@@ -109,8 +126,13 @@ class DividendFetcher(BaseFetcher):
 
         self.logger.info(f"Подготовлено {len(records)} записей после агрегации")
 
-        # Проверяем на наличие нулевых периодов
-        self._check_zero_periods(records)
+        # Проверяем наличие нулевых периодов
+        zero_periods = [r for r in records if r['dividend'] == 0]
+        if zero_periods:
+            self.logger.info(
+                f"Периодов без дивидендов: {len(zero_periods)} из {len(records)} "
+                f"({len(zero_periods) / len(records) * 100:.1f}%)"
+            )
 
         return records
 

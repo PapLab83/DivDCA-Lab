@@ -10,7 +10,7 @@ import json
 from typing import List, Dict, Any, Optional
 import pandas as pd
 
-from config.config import CALCULATION_INPUT_DATA_DIR
+from config.config import ETL_OUTPUT_DATA_DIR
 from .providers import get_provider, DataProvider, DataSource
 
 
@@ -32,9 +32,10 @@ class BaseFetcher(ABC):
             ticker: str,
             start_date: str,
             end_date: str,
+            frequency: str = 'YE',
             provider: Optional[DataProvider] = None,
             data_source: DataSource = DataSource.YAHOO,
-            output_dir: Path = CALCULATION_INPUT_DATA_DIR
+            output_dir: Path = ETL_OUTPUT_DATA_DIR,
     ):
         """
         Инициализация базового фетчера.
