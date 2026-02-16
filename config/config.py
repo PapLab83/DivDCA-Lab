@@ -53,8 +53,8 @@ REINVEST_DIVIDENDS = True
 # Базовые директории (относительно корня проекта)
 BASE_DIR = Path(__file__).parent.parent  # Корень проекта (уровень выше src/)
 DATA_DIR = BASE_DIR / "data"
-RAW_DATA_DIR = DATA_DIR / "raw"  # Исходные JSONL-файлы (TICKER.jsonl)
-PROCESSED_DATA_DIR = DATA_DIR / "processed"  # Кэш обработанных данных (опционально)
+CALCULATION_INPUT_DATA_DIR = DATA_DIR / "calculation_input"  # Исходные JSONL-файлы (TICKER.jsonl)
+ETL_OUTPUT_DATA_DIR = DATA_DIR / "etl_output"
 REPORTS_DIR = DATA_DIR / "reports"
 TABLES_DIR = REPORTS_DIR / "tables"  # Таблицы (CSV, Excel, JSON)
 GRAPHS_DIR = REPORTS_DIR / "graphs"  # HTML-отчёты с графиками
@@ -71,8 +71,8 @@ LOG_FILE = BASE_DIR / "divdca_lab.log"  # Файл для логов (опцио
 def setup_project_dirs() -> None:
     """Создаёт все необходимые директории проекта, если они не существуют."""
     dirs_to_create = [
-        RAW_DATA_DIR,
-        PROCESSED_DATA_DIR,
+        CALCULATION_INPUT_DATA_DIR,
+        ETL_OUTPUT_DATA_DIR,
         TABLES_DIR,
         GRAPHS_DIR,
     ]
@@ -107,7 +107,7 @@ def get_data_path(ticker: str = TICKER) -> Path:
     Возвращает полный путь к файлу с исходными данными для указанного тикера.
     Ожидаемое имя файла: {TICKER}.jsonl
     """
-    return RAW_DATA_DIR / f"{ticker.upper()}.jsonl"
+    return CALCULATION_INPUT_DATA_DIR / f"{ticker.upper()}.jsonl"
 
 
 # ==================== ВАЛИДАЦИЯ КОНФИГУРАЦИИ ====================

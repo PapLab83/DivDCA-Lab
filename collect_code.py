@@ -8,14 +8,8 @@ INCLUDE_ALL_FILES = True  # True - все файлы, False - только из 
 
 # Список файлов для включения (если INCLUDE_ALL_FILES = False)
 FILES_TO_INCLUDE = [
-    "config.py",
-    "main_network_new.py.py",
-    "region_processor.py",
-    "clustering_engine.py",
-    "clustering_result_manager.py",
-    "visualizer.py",
-    "data_loader.py",
-    "setup_logging.py"
+    # "config.py",
+    # "main_network_new.py.py",
 ]
 
 
