@@ -4,13 +4,12 @@
 Загружает цены, дивиденды и сплиты для указанных тикеров.
 
 Примеры использования:
-    python scripts/run_etl.py                                     # все тикеры, все типы
-    python scripts/run_etl.py --ticker JPM                        # только JPM
-    python scripts/run_etl.py --ticker JPM,KO,MCD                 # несколько тикеров
-    python scripts/run_etl.py --ticker "JPM KO MCD"               # тоже через пробел
-    python scripts/run_etl.py --data-type prices                  # только цены
-    python scripts/run_etl.py --ticker JPM --force               # перезаписать
-    python scripts/run_etl.py --start 2000-01-01 --end 2025-12-31 # свои даты
+    python scripts/extract.py --ticker JPM                        # только JPM
+    python scripts/extract.py --ticker JPM,KO,MCD                 # несколько тикеров
+    python scripts/extract.py --ticker "JPM KO MCD"               # тоже через пробел
+    python scripts/extract.py --data-type prices                  # только цены
+    python scripts/extract.py --ticker JPM --force               # перезаписать
+    python scripts/extract.py --start 2000-01-01 --end 2025-12-31 # свои даты
 """
 
 import argparse
