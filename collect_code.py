@@ -22,7 +22,7 @@ def collect_code(args):
 
     # Расширения по умолчанию (используются только если INCLUDE_ALL_FILES = True)
     if not args.extensions:
-        extensions = {".py", ".txt", ".md", ".yaml", ".yml", ".json", ".ini", ".cfg", ".toml"}
+        extensions = {".py", ".yaml", ".yml", ".ini", ".cfg", ".toml"}
     else:
         extensions = set(args.extensions)
 
