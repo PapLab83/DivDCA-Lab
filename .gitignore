@@ -215,6 +215,4 @@ __marimo__/
 
 collect_code.py
 
-data/calculation_input/*
-data/etl_output/*
-data/reports/*
+data/
