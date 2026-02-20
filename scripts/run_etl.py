@@ -296,18 +296,18 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Примеры:
-  python scripts/run_etl.py
   python scripts/run_etl.py --ticker JPM
   python scripts/run_etl.py --ticker JPM,KO,MCD
   python scripts/run_etl.py --ticker "JPM KO MCD" --data-type prices
-  python scripts/run_etl.py --start 2000-01-01 --end 2025-12-31 --force
+  python scripts/run_etl.py --ticker "JPM KO MCD" --start 2000-01-01 --end 2025-12-31 --force
         """
     )
 
     parser.add_argument(
         '--ticker',
         type=str,
-        help='Тикер или список тикеров (через запятую или пробел). По умолчанию все'
+        required=True,
+        help='Тикер или список тикеров (через запятую или пробел).'
     )
 
     parser.add_argument(
@@ -423,3 +423,7 @@ def main():
     # Возвращаем код возврата
     if any(not r['success'] and not r.get('skipped') for r in results):
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
