@@ -423,7 +423,3 @@ def main():
     # Возвращаем код возврата
     if any(not r['success'] and not r.get('skipped') for r in results):
         sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
