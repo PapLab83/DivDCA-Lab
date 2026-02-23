@@ -20,10 +20,10 @@ def get_all_tickers_from_extracted() -> List[str]:
     Returns:
         список тикеров (уникальных)
     """
-    from config.config import EXTRACTED_DATA_DIR
+    from config.config import ETL_OUTPUT_DATA_DIR
 
     pattern = "prices_*.jsonl"
-    files = list(EXTRACTED_DATA_DIR.glob(pattern))
+    files = list(ETL_OUTPUT_DATA_DIR.glob(pattern))
 
     tickers = []
     for f in files:
