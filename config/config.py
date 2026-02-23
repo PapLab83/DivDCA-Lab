@@ -55,6 +55,7 @@ BASE_DIR = Path(__file__).parent.parent  # Корень проекта (уров
 DATA_DIR = BASE_DIR / "data"
 CALCULATION_INPUT_DATA_DIR = DATA_DIR / "filtered"  # Исходные JSONL-файлы (TICKER.jsonl)
 ETL_OUTPUT_DATA_DIR = DATA_DIR / "extracted"
+TRANSFORMED_DATA_DIR = DATA_DIR / "transformed"
 REPORTS_DIR = DATA_DIR / "reported"
 TABLES_DIR = REPORTS_DIR / "tables"  # Таблицы (CSV, Excel, JSON)
 GRAPHS_DIR = REPORTS_DIR / "graphs"  # HTML-отчёты с графиками
