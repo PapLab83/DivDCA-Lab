@@ -102,35 +102,10 @@ def read_splits(ticker: str) -> List[RawSplit]:
 
 
 def read_reasons(ticker: str) -> List[RawReason]:
-    """
-    Читает все reasons для тикера из extracted/reasons_{ticker}_*.json
+    """Читает reasons для тикера из extracted/reasons_{ticker}.jsonl"""
+    filepath = ETL_OUTPUT_DATA_DIR / f"reasons_{ticker.upper()}.jsonl"
 
-    Поддерживает несколько файлов (по годам или один общий).
-
-    Args:
-        ticker: тикер (например, 'JPM')
-
-    Returns:
-        список RawReason, отсортированный по году
-    """
-    pattern = f"reasons_{ticker.upper()}_*.json"
-    files = list(ETL_OUTPUT_DATA_DIR.glob(pattern))
-
-    if not files:
+    if not filepath.exists():
         return []
 
-    all_reasons = []
-    for filepath in files:
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                # Поддерживаем как один объект, так и массив
-                if isinstance(data, list):
-                    for item in data:
-                        all_reasons.append(RawReason.model_validate(item))
-                else:
-                    all_reasons.append(RawReason.model_validate(data))
-        except Exception as e:
-            raise ValueError(f"Ошибка чтения {filepath}: {e}")
-
-    return sorted(all_reasons, key=lambda x: x.year)
+    return _read_jsonl(filepath, RawReason)  # 👏 переиспользуем
