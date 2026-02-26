@@ -22,11 +22,11 @@ def _read_jsonl(filepath: Path, model: Type[T]) -> List[T]:
         model: Pydantic модель для парсинга
 
     Returns:
-        список объектов модели
+        список объектов модели (может быть пустым)
 
     Raises:
         FileNotFoundError: если файл не существует
-        ValueError: если файл пустой или невалидный JSON
+        ValueError: если есть невалидные JSON строки
     """
     if not filepath.exists():
         raise FileNotFoundError(f"Файл не найден: {filepath}")
@@ -41,13 +41,11 @@ def _read_jsonl(filepath: Path, model: Type[T]) -> List[T]:
                 data = json.loads(line)
                 records.append(model.model_validate(data))
             except json.JSONDecodeError as e:
-                raise ValueError(f"Ошибка JSON в строке {line_num}: {e}")
+                raise ValueError(f"Ошибка JSON в строке {line_num} файла {filepath}: {e}")
             except Exception as e:
-                raise ValueError(f"Ошибка валидации в строке {line_num}: {e}")
+                raise ValueError(f"Ошибка валидации в строке {line_num} файла {filepath}: {e}")
 
-    if not records:
-        raise ValueError(f"Файл {filepath} пустой или не содержит валидных данных")
-
+    # Больше не падаем на пустом файле — просто возвращаем []
     return records
 
 
@@ -60,9 +58,16 @@ def read_prices(ticker: str) -> List[RawPrice]:
 
     Returns:
         список RawPrice, отсортированный по дате
+
+    Raises:
+        ValueError: если файл пустой (без цен трансформация невозможна)
     """
     filepath = ETL_OUTPUT_DATA_DIR / f"prices_{ticker.upper()}.jsonl"
     records = _read_jsonl(filepath, RawPrice)
+
+    if not records:
+        raise ValueError(f"Файл {filepath} пустой — нет данных о ценах для {ticker}")
+
     return sorted(records, key=lambda x: x.date)
 
 
@@ -74,7 +79,7 @@ def read_dividends(ticker: str) -> List[RawDividend]:
         ticker: тикер (например, 'JPM')
 
     Returns:
-        список RawDividend, отсортированный по дате
+        список RawDividend, отсортированный по дате (может быть пустым)
     """
     filepath = ETL_OUTPUT_DATA_DIR / f"dividends_{ticker.upper()}.jsonl"
     records = _read_jsonl(filepath, RawDividend)
@@ -89,23 +94,23 @@ def read_splits(ticker: str) -> List[RawSplit]:
         ticker: тикер (например, 'JPM')
 
     Returns:
-        список RawSplit, отсортированный по дате
+        список RawSplit, отсортированный по дате (может быть пустым)
     """
     filepath = ETL_OUTPUT_DATA_DIR / f"splits_{ticker.upper()}.jsonl"
-
-    # Сплитов может не быть — возвращаем пустой список
-    if not filepath.exists():
-        return []
-
     records = _read_jsonl(filepath, RawSplit)
     return sorted(records, key=lambda x: x.date)
 
 
 def read_reasons(ticker: str) -> List[RawReason]:
-    """Читает reasons для тикера из extracted/reasons_{ticker}.jsonl"""
+    """
+    Читает reasons для тикера из extracted/reasons_{ticker}.jsonl
+
+    Args:
+        ticker: тикер (например, 'JPM')
+
+    Returns:
+        список RawReason, отсортированный по году (может быть пустым)
+    """
     filepath = ETL_OUTPUT_DATA_DIR / f"reasons_{ticker.upper()}.jsonl"
-
-    if not filepath.exists():
-        return []
-
-    return _read_jsonl(filepath, RawReason)  # 👏 переиспользуем
+    records = _read_jsonl(filepath, RawReason)
+    return sorted(records, key=lambda x: x.year)
