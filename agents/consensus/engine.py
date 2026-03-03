@@ -1,0 +1,1 @@
+# ConsensusEngine - сравнение событий
