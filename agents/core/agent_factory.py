@@ -1,10 +1,24 @@
+import logging
+
+from typing import Dict, List, Optional, Type
+
+from base_agent import (
+    AgentConfig,
+    BaseAgent,
+    LLMAdapterProtocol,
+)
+
+
+logger = logging.getLogger(__name__)
+
+
 class AgentFactory:
     """Фабрика для создания агентов"""
 
-    _agents: Dict[str, Type[BaseAgent]] = {}
+    def __init__(self):
+        self._agents: Dict[str, Type[BaseAgent]] = {}
 
-    @classmethod
-    def register(cls, agent_type: str, agent_class: Type[BaseAgent]) -> None:
+    def register(self, agent_type: str, agent_class: Type[BaseAgent]) -> None:
         """
         Регистрирует новый тип агента.
 
@@ -14,18 +28,22 @@ class AgentFactory:
         """
         if not issubclass(agent_class, BaseAgent):
             raise TypeError(f"{agent_class.__name__} должен быть наследником BaseAgent")
-
-        cls._agents[agent_type] = agent_class
+        self._agents[agent_type] = agent_class
         logger.debug(f"Зарегистрирован тип агента: {agent_type} -> {agent_class.__name__}")
 
-    @classmethod
-    def create_agent(cls, agent_type: str, config: AgentConfig) -> BaseAgent:
+    def create_agent(
+        self,
+        agent_type: str,
+        config: AgentConfig,
+        llm_adapter: Optional[LLMAdapterProtocol] = None
+    ) -> BaseAgent:
         """
-        Создает агента нужного типа.
+        Создаёт агента нужного типа.
 
         Args:
             agent_type: строковый идентификатор агента
             config: конфигурация для агента
+            llm_adapter: адаптер для LLM
 
         Returns:
             экземпляр агента
@@ -33,14 +51,18 @@ class AgentFactory:
         Raises:
             ValueError: если тип агента не зарегистрирован
         """
-        if agent_type not in cls._agents:
-            raise ValueError(f"Неизвестный тип агента: {agent_type}. "
-                             f"Доступные: {list(cls._agents.keys())}")
+        if agent_type not in self._agents:
+            raise ValueError(
+                f"Неизвестный тип агента: {agent_type}. "
+                f"Доступные: {list(self._agents.keys())}"
+            )
+        agent_class = self._agents[agent_type]
+        return agent_class(config, llm_adapter)
 
-        agent_class = cls._agents[agent_type]
-        return agent_class(config)
-
-    @classmethod
-    def list_agents(cls) -> List[str]:
+    def list_agents(self) -> List[str]:
         """Возвращает список всех зарегистрированных типов агентов"""
-        return list(cls._agents.keys())
+        return list(self._agents.keys())
+
+    def unregister(self, agent_type: str) -> None:
+        """Удаляет агента из реестра (полезно в тестах)"""
+        self._agents.pop(agent_type, None)
