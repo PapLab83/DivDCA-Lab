@@ -1,76 +1,69 @@
 ```
-agents/
-├── __init__.py
-├── collect_code.py (10.9 KB)      # Утилита для сбора кода проекта
-├── orchestrator.py                 # Оркестратор: координация всего процесса
-├── pipeline.py                     # Полный пайплайн для одного тикера
-├── run.py                          # Точка входа для запуска и дебага
+project/
 │
-├── core/
-│   ├── __init__.py
-│   ├── base_agent.py               # Абстрактный класс для всех агентов
-│   ├── agent_registry.py           # Реестр агентов: регистрация, поиск, валидация
-│   ├── agent_factory.py            # Фабрика: создание агентов через реестр
-│   ├── prompt_manager.py           # Загрузка и сборка промптов из файлов
+├── agents/                        # 🧠 Agent Framework (переиспользуемый слой)
+│   ├── core/
+│   │   ├── base_agent.py
+│   │   ├── agent_registry.py
+│   │   ├── agent_factory.py
+│   │   └── prompt_manager.py
 │   │
 │   ├── llm/
-│   │   ├── __init__.py
-│   │   ├── adapter.py              # LLMAdapter - единый интерфейс для агентов
-│   │   │
+│   │   ├── adapter.py
 │   │   └── engines/
-│   │       ├── __init__.py
-│   │       ├── base_engine.py      # Абстрактный класс engine, контракт call()
-│   │       ├── openai_engine.py    # OpenAI + совместимые (gptunnel) через base_url
-│   │       ├── claude_engine.py    # Claude engine
-│   │       └── gemini_engine.py    # Gemini engine
+│   │       ├── base_engine.py
+│   │       ├── openai_engine.py
+│   │       ├── claude_engine.py
+│   │       └── gemini_engine.py
 │   │
-│   └── skills/
-│       ├── __init__.py
-│       ├── cache.py                # CacheSkill
-│       └── json_validator.py       # JsonValidatorSkill
+│   ├── skills/
+│   │   ├── cache.py
+│   │   └── json_validator.py
+│   │
+│   ├── tools/                    # 🔌 абстракции внешнего мира
+│   │   ├── base_tool.py
+│   │   ├── etl_tool.py
+│   │   ├── db_tool.py
+│   │   └── calculation_tool.py
+│   │
+│   └── tasks/                    # 🤖 реализации агентов
+│       ├── event_generation/
+│       │   ├── agent.py
+│       │   └── prompts/
+│       │
+│       └── event_scoring/
+│           ├── agent.py
+│           └── prompts/
 │
-└── tasks/
-    ├── __init__.py
-    │
-    ├── event_generation/
-    │   ├── __init__.py
-    │   ├── agent.py                # EventGenerationAgent - генерация событий по тикеру
-    │   └── prompts/
-    │       ├── 01_role.txt
-    │       ├── 02_task.txt
-    │       └── 03_output_format.txt
-    │
-    ├── event_scoring/
-    │   ├── __init__.py
-    │   ├── agent.py                # EventScoringAgent - оценка важности события
-    │   └── prompts/
-    │       ├── 01_role.txt
-    │       ├── 02_task.txt
-    │       └── 03_output_format.txt
-    │
-    ├── impact_analysis/
-    │   ├── __init__.py
-    │   ├── agent.py                # ImpactAnalysisAgent - анализ влияния на цену
-    │   └── prompts/
-    │       ├── 01_role.txt
-    │       ├── 02_task.txt
-    │       └── 03_output_format.txt
-    │
-    ├── consensus/
-    │   ├── __init__.py
-    │   ├── agent.py                # ConsensusAgent - финальное решение по сигналу
-    │   └── prompts/
-    │       ├── 01_role.txt
-    │       ├── 02_task.txt
-    │       └── 03_output_format.txt
-    │
-    └── risk_assessment/
-        ├── __init__.py
-        ├── agent.py                # RiskAssessmentAgent - оценка рисков позиции
-        └── prompts/
-            ├── 01_role.txt
-            ├── 02_task.txt
-            └── 03_output_format.txt
+│
+├── mas/                          # ⚙️ Multi-Agent Systems (сценарии)
+│   ├── scenario_a/
+│   │   ├── orchestrator.py       # логика взаимодействия агентов
+│   │   ├── pipeline.py           # пайплайн (опционально)
+│   │   └── run.py                # точка входа
+│   │
+│   ├── scenario_b/               # появится позже
+│   │   └── ...
+│   │
+│   └── shared/                  # (опционально)
+│       ├── memory.py
+│       └── schemas.py
+│
+│
+├── data_platform/               # 📊 ETL / подготовка данных
+│   ├── etl/
+│   ├── loaders/
+│   └── pipelines/
+│
+│
+├── calculations/                # 📈 классические расчёты (без агентов)
+│
+├── db/                          # 🗄️ доступ к БД
+│
+├── config/
+│
+└── main.py (или entrypoints)
+
 ```
 
 ### Краткое описание основных файлов (в порядке архитектурной иерархии)
