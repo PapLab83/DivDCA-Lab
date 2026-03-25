@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Dict, Any, Protocol, runtime_checkable
+from typing import Optional, Dict, Any, Protocol, Tuple, runtime_checkable
 
 
 __all__ = [
@@ -56,10 +56,7 @@ class LLMAdapterProtocol(Protocol):
 
 @runtime_checkable
 class AsyncLLMAdapterProtocol(Protocol):
-    """
-    Контракт для асинхронных LLM адаптеров.
-    TODO: интегрировать в BaseAgent.execute_async() когда потребуется.
-    """
+    """Контракт для асинхронных LLM адаптеров."""
 
     async def call(self, prompt: str) -> str: ...
 
@@ -68,7 +65,7 @@ class AsyncLLMAdapterProtocol(Protocol):
 class PromptManagerProtocol(Protocol):
     """Контракт для менеджера промптов"""
 
-    def get_prompt(self, task: str, **variables) -> tuple[str, str]: ...
+    def get_prompt(self, task: str, **variables: Any) -> Tuple[str, str]: ...
     # возвращает (prompt, version)
 
 
@@ -107,7 +104,7 @@ class LLMConfig:
     max_tokens: int = 1000
     timeout_seconds: int = 30
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not 0.0 <= self.temperature <= 2.0:
             raise ValueError(
                 f"temperature должна быть в диапазоне [0, 2], получено: {self.temperature}"
@@ -124,10 +121,16 @@ class ApiConfig:
     base_url: str = ""
     api_key: str = ""
     retries: int = 3
+    retry_delay_seconds: float = 1.0
     timeout_seconds: int = 30
 
     def __repr__(self) -> str:
-        masked = self.api_key[:4] + "****" if len(self.api_key) > 4 else "****"
+        if len(self.api_key) > 4:
+            masked = self.api_key[:4] + "****"
+        elif self.api_key:
+            masked = "****"
+        else:
+            masked = "<empty>"
         return (
             f"ApiConfig(base_url={self.base_url!r}, api_key={masked!r}, "
             f"retries={self.retries}, timeout_seconds={self.timeout_seconds})"
@@ -142,7 +145,7 @@ class AgentConfig:
     api_config: ApiConfig = field(default_factory=ApiConfig)
     cache_enabled: bool = True
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.mode != AgentMode.API:
             raise NotImplementedError(
                 f"Режим {self.mode} ещё не реализован. Доступен только: {AgentMode.API}"
@@ -153,7 +156,7 @@ class AgentConfig:
 
 @dataclass
 class AgentContext:
-    """Контекст выполнения агента"""
+    """Контекст выполнения агента (иммутабельный по соглашению)"""
     agent_id: str
     task: str
     start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -191,10 +194,11 @@ class BaseAgent(ABC):
         self,
         config: AgentConfig,
         llm_adapter: Optional[LLMAdapterProtocol] = None,
+        prompt_manager: Optional[PromptManagerProtocol] = None,
     ):
         self.config = config
         self.llm_adapter = llm_adapter
-        self.prompt_manager: Optional[PromptManagerProtocol] = None
+        self.prompt_manager = prompt_manager
         logger.debug("Инициализирован агент %s", self.__class__.__name__)
 
     def __repr__(self) -> str:
@@ -207,8 +211,8 @@ class BaseAgent(ABC):
         Основной метод выполнения агента.
         Содержит обёртку с замерами времени и обработкой ошибок.
         """
-        start_time = time.time()
-        result: Optional[AgentResult] = None
+        start_time = time.monotonic()
+        result: AgentResult
 
         try:
             logger.info(
@@ -219,12 +223,8 @@ class BaseAgent(ABC):
             self._setup(context)
             result = self._execute_internal(context)
 
-            # Подтягиваем prompt_version из context если не задан
-            prompt_version = result.prompt_version or context.metadata.get("prompt_version")
-
             result = replace(
                 result,
-                prompt_version=prompt_version,
                 metadata={**result.metadata, "agent_class": self.__class__.__name__},
             )
 
@@ -242,12 +242,53 @@ class BaseAgent(ABC):
 
         finally:
             self._cleanup(context)
-            if result is not None:
-                duration_ms = int((time.time() - start_time) * 1000)
-                result = replace(result, duration_ms=duration_ms)
-                self._log_usage(result)
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            result = replace(result, duration_ms=duration_ms)
+            self._log_usage(result)
 
-        return result  # type: ignore[return-value]
+        return result
+
+    async def execute_async(self, context: AgentContext) -> AgentResult:
+        """
+        Асинхронный метод выполнения агента.
+        Использует AsyncLLMAdapterProtocol для вызовов LLM.
+        """
+        start_time = time.monotonic()
+        result: AgentResult
+
+        try:
+            logger.info(
+                "Async запуск агента %s (task=%s, agent_id=%s)",
+                self.__class__.__name__, context.task, context.agent_id,
+            )
+
+            self._setup(context)
+            result = await self._execute_internal_async(context)
+
+            result = replace(
+                result,
+                metadata={**result.metadata, "agent_class": self.__class__.__name__},
+            )
+
+        except Exception as e:
+            logger.error("Ошибка в агенте %s: %s", self.__class__.__name__, e, exc_info=True)
+            try:
+                result = self._handle_error(e)
+            except Exception as inner:
+                logger.critical("Ошибка в _handle_error: %s", inner, exc_info=True)
+                result = AgentResult(
+                    success=False,
+                    error=f"Critical: {inner.__class__.__name__}: {inner}",
+                    metadata={"agent_class": self.__class__.__name__},
+                )
+
+        finally:
+            self._cleanup(context)
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            result = replace(result, duration_ms=duration_ms)
+            self._log_usage(result)
+
+        return result
 
     # ── abstract ──────────────────────────────────────────────────
 
@@ -255,6 +296,14 @@ class BaseAgent(ABC):
     def _execute_internal(self, context: AgentContext) -> AgentResult:
         """Внутренняя реализация — переопределяется в наследниках."""
         ...
+
+    async def _execute_internal_async(self, context: AgentContext) -> AgentResult:
+        """
+        Асинхронная внутренняя реализация.
+        По умолчанию делегирует в синхронный метод.
+        Переопределите для настоящей async-логики.
+        """
+        return self._execute_internal(context)
 
     # ── hooks (переопределяемые) ──────────────────────────────────
 
@@ -266,8 +315,11 @@ class BaseAgent(ABC):
 
     # ── helpers ────────────────────────────────────────────────────
 
-    def _get_prompt(self, context: AgentContext, **variables: Any) -> str:
-        """Получение промпта через PromptManager."""
+    def _get_prompt(self, context: AgentContext, **variables: Any) -> Tuple[str, str]:
+        """
+        Получение промпта через PromptManager.
+        Возвращает (prompt, version) без мутации context.
+        """
         if not self.prompt_manager:
             raise RuntimeError("prompt_manager не инициализирован")
 
@@ -275,23 +327,82 @@ class BaseAgent(ABC):
             task=context.task,
             **variables,
         )
-        context.metadata["prompt_version"] = version
-        return prompt
+        return prompt, version
 
     def _call_llm(self, prompt: str) -> str:
-        """Вызов LLM адаптера."""
+        """Вызов LLM адаптера с поддержкой retry."""
         if not self.llm_adapter:
             raise RuntimeError("llm_adapter не инициализирован")
-        return self.llm_adapter.call(prompt)
+
+        retries = self.config.api_config.retries
+        delay = self.config.api_config.retry_delay_seconds
+        last_error: Optional[Exception] = None
+
+        for attempt in range(1, retries + 1):
+            try:
+                return self.llm_adapter.call(prompt)
+            except Exception as e:
+                last_error = e
+                if attempt < retries:
+                    logger.warning(
+                        "LLM вызов (попытка %d/%d) неудачен: %s. Повтор через %.1fс",
+                        attempt, retries, e, delay,
+                    )
+                    time.sleep(delay)
+                    delay *= 2  # exponential backoff
+                else:
+                    logger.error(
+                        "LLM вызов исчерпал все %d попыток: %s",
+                        retries, e,
+                    )
+
+        raise last_error  # type: ignore[misc]
+
+    async def _call_llm_async(self, prompt: str) -> str:
+        """Асинхронный вызов LLM адаптера с поддержкой retry."""
+        import asyncio
+
+        if not isinstance(self.llm_adapter, AsyncLLMAdapterProtocol):
+            raise RuntimeError(
+                "llm_adapter не реализует AsyncLLMAdapterProtocol"
+            )
+
+        retries = self.config.api_config.retries
+        delay = self.config.api_config.retry_delay_seconds
+        last_error: Optional[Exception] = None
+
+        for attempt in range(1, retries + 1):
+            try:
+                return await self.llm_adapter.call(prompt)
+            except Exception as e:
+                last_error = e
+                if attempt < retries:
+                    logger.warning(
+                        "Async LLM вызов (попытка %d/%d) неудачен: %s. Повтор через %.1fс",
+                        attempt, retries, e, delay,
+                    )
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                else:
+                    logger.error(
+                        "Async LLM вызов исчерпал все %d попыток: %s",
+                        retries, e,
+                    )
+
+        raise last_error  # type: ignore[misc]
 
     def _validate_result(self, result: Dict[str, Any]) -> bool:
-        """Базовая валидация результата. Может быть переопределена."""
+        """
+        Валидация распарсенного результата.
+        Переопределите в наследниках для проверки обязательных полей.
+        """
         return bool(result)
 
     def _parse_response(self, response: str) -> Dict[str, Any]:
         """
         Парсинг ответа от LLM.
         Поддерживает извлечение JSON из markdown-блоков.
+        Автоматически вызывает _validate_result.
         """
         cleaned = response.strip()
 
@@ -300,7 +411,7 @@ class BaseAgent(ABC):
             cleaned = match.group(1)
 
         try:
-            return json.loads(cleaned.strip())
+            parsed: Dict[str, Any] = json.loads(cleaned.strip())
         except json.JSONDecodeError as e:
             logger.error("Ошибка парсинга JSON: %s", e)
             logger.debug("Ответ: %s", response)
@@ -308,6 +419,14 @@ class BaseAgent(ABC):
                 message=f"Ошибка парсинга JSON: {e}",
                 raw_response=response,
             ) from e
+
+        if not self._validate_result(parsed):
+            raise LLMParseError(
+                message="Результат не прошёл валидацию",
+                raw_response=response,
+            )
+
+        return parsed
 
     def _handle_error(self, error: Exception) -> AgentResult:
         """Обработка ошибок — может быть переопределена."""
@@ -319,13 +438,14 @@ class BaseAgent(ABC):
 
     def _log_usage(self, result: AgentResult) -> None:
         """Логирование результата выполнения."""
+        duration = result.duration_ms if result.duration_ms is not None else -1
         if result.success:
             logger.info(
                 "Агент %s успешно выполнен за %dмс",
-                self.__class__.__name__, result.duration_ms,
+                self.__class__.__name__, duration,
             )
         else:
             logger.warning(
-                "Агент %s завершился с ошибкой: %s",
-                self.__class__.__name__, result.error,
+                "Агент %s завершился с ошибкой за %dмс: %s",
+                self.__class__.__name__, duration, result.error,
             )
