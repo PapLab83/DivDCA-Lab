@@ -3,6 +3,7 @@
 Поддерживает ручную регистрацию и декоратор @register_agent.
 """
 import logging
+import threading
 from typing import Dict, List, Optional, Type
 
 from agents.core.base_agent import AgentConfig, BaseAgent, LLMAdapterProtocol
@@ -12,10 +13,26 @@ logger = logging.getLogger(__name__)
 
 
 class AgentFactory:
-    """Фабрика для создания агентов"""
+    """Фабрика для создания агентов (потокобезопасная, singleton)."""
+
+    _instance: Optional["AgentFactory"] = None
+    _init_lock = threading.Lock()
+
+    # ── singleton ─────────────────────────────────────────────────
+
+    def __new__(cls) -> "AgentFactory":
+        if cls._instance is None:
+            with cls._init_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
 
     def __init__(self):
+        # Инициализируем только один раз
+        if hasattr(self, "_agents"):
+            return
         self._agents: Dict[str, Type[BaseAgent]] = {}
+        self._lock = threading.Lock()
 
     # ── регистрация ───────────────────────────────────────────────
 
@@ -26,11 +43,26 @@ class AgentFactory:
         Args:
             agent_type: строковый идентификатор (например, 'event_generation')
             agent_class: класс агента, наследующий BaseAgent
+
+        Raises:
+            TypeError: если agent_class не наследник BaseAgent
         """
         if not issubclass(agent_class, BaseAgent):
             raise TypeError(f"{agent_class.__name__} должен быть наследником BaseAgent")
-        self._agents[agent_type] = agent_class
-        logger.debug("Зарегистрирован тип агента: %s -> %s", agent_type, agent_class.__name__)
+
+        with self._lock:
+            if agent_type in self._agents:
+                existing = self._agents[agent_type].__name__
+                logger.warning(
+                    "Тип агента '%s' уже зарегистрирован (%s), перезаписывается на %s",
+                    agent_type,
+                    existing,
+                    agent_class.__name__,
+                )
+            self._agents[agent_type] = agent_class
+            logger.debug(
+                "Зарегистрирован тип агента: %s -> %s", agent_type, agent_class.__name__
+            )
 
     def register_agent(self, agent_type: str):
         """
@@ -49,7 +81,8 @@ class AgentFactory:
 
     def unregister(self, agent_type: str) -> None:
         """Удаляет агента из реестра (полезно в тестах)."""
-        self._agents.pop(agent_type, None)
+        with self._lock:
+            self._agents.pop(agent_type, None)
 
     # ── создание ──────────────────────────────────────────────────
 
@@ -65,21 +98,23 @@ class AgentFactory:
         Raises:
             ValueError: если тип агента не зарегистрирован
         """
-        if agent_type not in self._agents:
-            raise ValueError(
-                f"Неизвестный тип агента: {agent_type}. "
-                f"Доступные: {list(self._agents.keys())}"
-            )
-        agent_class = self._agents[agent_type]
+        with self._lock:
+            if agent_type not in self._agents:
+                raise ValueError(
+                    f"Неизвестный тип агента: {agent_type}. "
+                    f"Доступные: {list(self._agents.keys())}"
+                )
+            agent_class = self._agents[agent_type]
         return agent_class(config, llm_adapter)
 
     # ── информация ────────────────────────────────────────────────
 
     def list_agents(self) -> List[str]:
         """Возвращает список всех зарегистрированных типов агентов."""
-        return list(self._agents.keys())
+        with self._lock:
+            return list(self._agents.keys())
 
 
-# Глобальный экземпляр фабрики (singleton-like для удобства декораторов)
+# Глобальный экземпляр фабрики (singleton)
 default_factory = AgentFactory()
 register_agent = default_factory.register_agent
