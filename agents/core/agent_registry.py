@@ -1,12 +1,15 @@
 """
 Реестр метаданных агентов.
 Хранит описание, версию, входные/выходные данные каждого агента.
+Не содержит бизнес-логики валидации.
 """
 import logging
+import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional
 
-from agents.core.base_agent import AgentConfig
+import yaml
 
 
 logger = logging.getLogger(__name__)
@@ -24,19 +27,32 @@ class AgentMetadata:
     supported_providers: List[str] = field(default_factory=list)
 
 
+class AgentNotFoundError(KeyError):
+    """Агент не найден в реестре."""
+
+
 class AgentRegistry:
     """
     Реестр всех доступных агентов.
-    Хранит метаданные о каждом агенте.
+    Единственная ответственность — хранение и доступ к метаданным.
     """
 
     def __init__(self, load_defaults: bool = True):
         self._agents: Dict[str, AgentMetadata] = {}
+        self._lock = threading.RLock()
         if load_defaults:
             self._load_defaults()
 
+    # ── загрузка ──────────────────────────────────────────────────
+
     def _load_defaults(self) -> None:
-        """Загружает метаданные агентов по умолчанию."""
+        """Загружает метаданные из YAML; fallback — встроенный набор."""
+        default_path = Path(__file__).parent / "agents_defaults.yaml"
+        if default_path.exists():
+            self.load_from_file(default_path)
+            return
+
+        logger.debug("Файл %s не найден, используются встроенные дефолты", default_path)
         defaults = {
             "event_generation": AgentMetadata(
                 name="Event Generation Agent",
@@ -55,27 +71,63 @@ class AgentRegistry:
                 prompt_components=["system", "instruction", "format"],
             ),
         }
-        self._agents.update(defaults)
+        with self._lock:
+            self._agents.update(defaults)
+
+    def load_from_file(self, path: Path) -> None:
+        """Загружает метаданные агентов из YAML-файла."""
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError(f"Ожидался dict в {path}, получен {type(data).__name__}")
+        with self._lock:
+            for key, meta in data.items():
+                self._agents[key] = AgentMetadata(**meta)
+        logger.debug("Загружено %d агентов из %s", len(data), path)
 
     # ── CRUD ──────────────────────────────────────────────────────
 
     def register(self, agent_type: str, metadata: AgentMetadata) -> None:
         """Регистрирует метаданные агента."""
-        self._agents[agent_type] = metadata
+        with self._lock:
+            self._agents[agent_type] = metadata
         logger.debug("Зарегистрированы метаданные для агента: %s", agent_type)
+
+    def unregister(self, agent_type: str) -> None:
+        """Удаляет агента из реестра."""
+        with self._lock:
+            if agent_type not in self._agents:
+                raise AgentNotFoundError(f"Агент '{agent_type}' не найден в реестре")
+            del self._agents[agent_type]
+        logger.debug("Удалены метаданные агента: %s", agent_type)
 
     def get(self, agent_type: str) -> Optional[AgentMetadata]:
         """Возвращает метаданные агента или None."""
-        return self._agents.get(agent_type)
+        with self._lock:
+            return self._agents.get(agent_type)
+
+    def get_or_raise(self, agent_type: str) -> AgentMetadata:
+        """Возвращает метаданные или бросает AgentNotFoundError."""
+        with self._lock:
+            try:
+                return self._agents[agent_type]
+            except KeyError:
+                raise AgentNotFoundError(
+                    f"Агент '{agent_type}' не найден в реестре"
+                ) from None
 
     def list_agents(self) -> List[str]:
         """Список всех зарегистрированных агентов."""
-        return list(self._agents.keys())
+        with self._lock:
+            return list(self._agents.keys())
+
+    def __contains__(self, agent_type: str) -> bool:
+        with self._lock:
+            return agent_type in self._agents
 
     # ── отображение ───────────────────────────────────────────────
 
     def format_info(self, agent_type: str) -> str:
-        """Возвращает human-readable описание агента."""
+        """Human-readable описание агента."""
         metadata = self.get(agent_type)
         if metadata is None:
             return f"Агент '{agent_type}' не найден"
@@ -87,19 +139,3 @@ class AgentRegistry:
             f"Выходные данные: {', '.join(metadata.outputs)}",
         ]
         return "\n".join(lines)
-
-    # ── валидация ─────────────────────────────────────────────────
-
-    def validate_agent(self, agent_type: str, config: AgentConfig) -> bool:
-        """Проверяет, может ли агент работать с заданной конфигурацией."""
-        metadata = self.get(agent_type)
-        if not metadata:
-            return False
-        if metadata.supported_providers:
-            if config.llm_config.provider.value not in metadata.supported_providers:
-                logger.warning(
-                    "Агент %s не поддерживает провайдера %s",
-                    agent_type, config.llm_config.provider,
-                )
-                return False
-        return True
