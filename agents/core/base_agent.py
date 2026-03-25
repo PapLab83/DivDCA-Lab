@@ -8,10 +8,10 @@ import re
 import time
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Dict, Any, Protocol, runtime_checkable
-from dataclasses import dataclass, field
 
 
 __all__ = [
@@ -19,6 +19,7 @@ __all__ = [
     "LLMAdapterProtocol",
     "AsyncLLMAdapterProtocol",
     "PromptManagerProtocol",
+    "CacheProtocol",
     "AgentMode",
     "LLMProvider",
     "LLMConfig",
@@ -34,31 +35,53 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+# ─────────────────────────── Exceptions ───────────────────────────
+
 class LLMParseError(Exception):
     """Ошибка парсинга ответа от LLM"""
+
     def __init__(self, message: str, raw_response: str):
         self.raw_response = raw_response
         super().__init__(message)
 
 
+# ─────────────────────────── Protocols ────────────────────────────
+
 @runtime_checkable
 class LLMAdapterProtocol(Protocol):
-    """Контракт для LLM адаптеров"""
+    """Контракт для синхронных LLM адаптеров"""
+
     def call(self, prompt: str) -> str: ...
 
 
 @runtime_checkable
 class AsyncLLMAdapterProtocol(Protocol):
-    """Контракт для асинхронных LLM адаптеров"""
+    """
+    Контракт для асинхронных LLM адаптеров.
+    TODO: интегрировать в BaseAgent.execute_async() когда потребуется.
+    """
+
     async def call(self, prompt: str) -> str: ...
 
 
 @runtime_checkable
 class PromptManagerProtocol(Protocol):
     """Контракт для менеджера промптов"""
+
     def get_prompt(self, task: str, **variables) -> tuple[str, str]: ...
     # возвращает (prompt, version)
 
+
+@runtime_checkable
+class CacheProtocol(Protocol):
+    """Контракт для кэша"""
+
+    def get(self, key: str) -> Optional[str]: ...
+
+    def set(self, key: str, value: str) -> None: ...
+
+
+# ─────────────────────────── Enums ────────────────────────────────
 
 class AgentMode(str, Enum):
     """Режимы работы агента"""
@@ -73,6 +96,8 @@ class LLMProvider(str, Enum):
     MOCK = "mock"
 
 
+# ─────────────────────────── Configs ──────────────────────────────
+
 @dataclass
 class LLMConfig:
     """Конфигурация LLM"""
@@ -84,9 +109,13 @@ class LLMConfig:
 
     def __post_init__(self):
         if not 0.0 <= self.temperature <= 2.0:
-            raise ValueError(f"temperature должна быть в диапазоне [0, 2], получено: {self.temperature}")
+            raise ValueError(
+                f"temperature должна быть в диапазоне [0, 2], получено: {self.temperature}"
+            )
         if self.max_tokens <= 0:
-            raise ValueError(f"max_tokens должно быть положительным, получено: {self.max_tokens}")
+            raise ValueError(
+                f"max_tokens должно быть положительным, получено: {self.max_tokens}"
+            )
 
 
 @dataclass
@@ -96,6 +125,13 @@ class ApiConfig:
     api_key: str = ""
     retries: int = 3
     timeout_seconds: int = 30
+
+    def __repr__(self) -> str:
+        masked = self.api_key[:4] + "****" if len(self.api_key) > 4 else "****"
+        return (
+            f"ApiConfig(base_url={self.base_url!r}, api_key={masked!r}, "
+            f"retries={self.retries}, timeout_seconds={self.timeout_seconds})"
+        )
 
 
 @dataclass
@@ -108,8 +144,12 @@ class AgentConfig:
 
     def __post_init__(self):
         if self.mode != AgentMode.API:
-            raise NotImplementedError(f"Режим {self.mode} ещё не реализован. Доступен только: {AgentMode.API}")
+            raise NotImplementedError(
+                f"Режим {self.mode} ещё не реализован. Доступен только: {AgentMode.API}"
+            )
 
+
+# ─────────────────────────── Context ──────────────────────────────
 
 @dataclass
 class AgentContext:
@@ -127,6 +167,8 @@ class FinancialAgentContext(AgentContext):
     year: Optional[int] = None
 
 
+# ─────────────────────────── Result ───────────────────────────────
+
 @dataclass(frozen=True)
 class AgentResult:
     """Результат работы агента"""
@@ -140,13 +182,15 @@ class AgentResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+# ─────────────────────────── BaseAgent ────────────────────────────
+
 class BaseAgent(ABC):
     """Абстрактный базовый класс для всех агентов"""
 
     def __init__(
         self,
         config: AgentConfig,
-        llm_adapter: Optional[LLMAdapterProtocol] = None
+        llm_adapter: Optional[LLMAdapterProtocol] = None,
     ):
         self.config = config
         self.llm_adapter = llm_adapter
@@ -156,10 +200,12 @@ class BaseAgent(ABC):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(mode={self.config.mode})"
 
+    # ── public ────────────────────────────────────────────────────
+
     def execute(self, context: AgentContext) -> AgentResult:
         """
         Основной метод выполнения агента.
-        Содержит обертку с замерами времени и обработкой ошибок.
+        Содержит обёртку с замерами времени и обработкой ошибок.
         """
         start_time = time.time()
         result: Optional[AgentResult] = None
@@ -167,25 +213,19 @@ class BaseAgent(ABC):
         try:
             logger.info(
                 "Запуск агента %s (task=%s, agent_id=%s)",
-                self.__class__.__name__, context.task, context.agent_id
+                self.__class__.__name__, context.task, context.agent_id,
             )
 
             self._setup(context)
             result = self._execute_internal(context)
 
-            prompt_version = result.prompt_version
-            if prompt_version is None:
-                prompt_version = context.metadata.get('prompt_version')
+            # Подтягиваем prompt_version из context если не задан
+            prompt_version = result.prompt_version or context.metadata.get("prompt_version")
 
-            result = AgentResult(
-                success=result.success,
-                data=result.data,
-                error=result.error,
+            result = replace(
+                result,
                 prompt_version=prompt_version,
-                llm_response=result.llm_response,
-                tokens_used=result.tokens_used,
-                duration_ms=result.duration_ms,
-                metadata={**result.metadata, 'agent_class': self.__class__.__name__},
+                metadata={**result.metadata, "agent_class": self.__class__.__name__},
             )
 
         except Exception as e:
@@ -197,79 +237,65 @@ class BaseAgent(ABC):
                 result = AgentResult(
                     success=False,
                     error=f"Critical: {inner.__class__.__name__}: {inner}",
-                    metadata={'agent_class': self.__class__.__name__},
+                    metadata={"agent_class": self.__class__.__name__},
                 )
 
         finally:
             self._cleanup(context)
             if result is not None:
                 duration_ms = int((time.time() - start_time) * 1000)
-                result = AgentResult(
-                    success=result.success,
-                    data=result.data,
-                    error=result.error,
-                    prompt_version=result.prompt_version,
-                    llm_response=result.llm_response,
-                    tokens_used=result.tokens_used,
-                    duration_ms=duration_ms,
-                    metadata=result.metadata,
-                )
+                result = replace(result, duration_ms=duration_ms)
                 self._log_usage(result)
 
-        return result
+        return result  # type: ignore[return-value]
+
+    # ── abstract ──────────────────────────────────────────────────
 
     @abstractmethod
     def _execute_internal(self, context: AgentContext) -> AgentResult:
-        """
-        Внутренняя реализация выполнения агента.
-        Должна быть переопределена в наследниках.
-        """
-        pass
+        """Внутренняя реализация — переопределяется в наследниках."""
+        ...
+
+    # ── hooks (переопределяемые) ──────────────────────────────────
 
     def _setup(self, context: AgentContext) -> None:
-        """Подготовка к выполнению (может быть переопределено)"""
-        pass
+        """Подготовка к выполнению."""
 
     def _cleanup(self, context: AgentContext) -> None:
-        """Очистка после выполнения (может быть переопределено)"""
-        pass
+        """Очистка после выполнения."""
 
-    def _get_prompt(self, context: AgentContext, **variables) -> str:
-        """
-        Получение промпта через PromptManager.
-        Должен быть инициализирован в наследнике.
-        """
+    # ── helpers ────────────────────────────────────────────────────
+
+    def _get_prompt(self, context: AgentContext, **variables: Any) -> str:
+        """Получение промпта через PromptManager."""
         if not self.prompt_manager:
             raise RuntimeError("prompt_manager не инициализирован")
 
         prompt, version = self.prompt_manager.get_prompt(
             task=context.task,
-            **variables
+            **variables,
         )
-        context.metadata['prompt_version'] = version
+        context.metadata["prompt_version"] = version
         return prompt
 
     def _call_llm(self, prompt: str) -> str:
-        """Вызов LLM адаптера"""
+        """Вызов LLM адаптера."""
         if not self.llm_adapter:
             raise RuntimeError("llm_adapter не инициализирован")
         return self.llm_adapter.call(prompt)
 
-    def _validate_result(self, result: Dict) -> bool:
-        """
-        Базовая валидация результата.
-        Может быть переопределена в наследнике.
-        """
+    def _validate_result(self, result: Dict[str, Any]) -> bool:
+        """Базовая валидация результата. Может быть переопределена."""
         return bool(result)
 
-    def _parse_response(self, response: str) -> Dict:
+    def _parse_response(self, response: str) -> Dict[str, Any]:
         """
         Парсинг ответа от LLM.
-        Выбрасывает LLMParseError если ответ не является валидным JSON.
+        Поддерживает извлечение JSON из markdown-блоков.
         """
         cleaned = response.strip()
 
-        match = re.search(r'```(?:json)?\s*(.*?)\s*```', cleaned, re.DOTALL)
+        match = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
         if match:
             cleaned = match.group(1)
 
@@ -280,26 +306,26 @@ class BaseAgent(ABC):
             logger.debug("Ответ: %s", response)
             raise LLMParseError(
                 message=f"Ошибка парсинга JSON: {e}",
-                raw_response=response
+                raw_response=response,
             ) from e
 
     def _handle_error(self, error: Exception) -> AgentResult:
-        """Обработка ошибок"""
+        """Обработка ошибок — может быть переопределена."""
         return AgentResult(
             success=False,
-            error=f"{error.__class__.__name__}: {str(error)}",
-            metadata={'agent_class': self.__class__.__name__}
+            error=f"{error.__class__.__name__}: {error}",
+            metadata={"agent_class": self.__class__.__name__},
         )
 
     def _log_usage(self, result: AgentResult) -> None:
-        """Логирование использования"""
+        """Логирование результата выполнения."""
         if result.success:
             logger.info(
                 "Агент %s успешно выполнен за %dмс",
-                self.__class__.__name__, result.duration_ms
+                self.__class__.__name__, result.duration_ms,
             )
         else:
             logger.warning(
                 "Агент %s завершился с ошибкой: %s",
-                self.__class__.__name__, result.error
+                self.__class__.__name__, result.error,
             )

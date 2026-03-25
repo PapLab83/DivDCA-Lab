@@ -1,44 +1,48 @@
 """
-LLM Adapter - единый интерфейс для работы с разными LLM провайдерами.
-Берёт на себя retry логику и подсчёт токенов.
-Cache подключается через skills/cache.py.
+LLM Adapter — единый интерфейс для работы с разными LLM провайдерами.
+Включает retry логику (tenacity), подсчёт токенов и опциональный кэш.
 """
-
+import json
 import logging
-import time
 from typing import Optional
 
-# TODO создать минимально рабочий набор для обкатки
-from agents.core.base_agent import LLMConfig, LLMProvider
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
+
+from agents.core.base_agent import LLMConfig, LLMProvider, CacheProtocol
+from agents.core.llm.engines.base_engine import BaseLLMEngine
 from agents.core.llm.engines.openai_engine import OpenAIEngine
 from agents.core.llm.engines.claude_engine import ClaudeEngine
 from agents.core.llm.engines.gemini_engine import GeminiEngine
 
+
 logger = logging.getLogger(__name__)
 
-# Максимальное количество попыток при ошибке
 MAX_RETRIES = 3
-# Пауза между попытками в секундах
-RETRY_DELAY = 2
 
 
 class LLMAdapter:
-    """Единый интерфейс для работы с разными LLM провайдерами"""
+    """Единый интерфейс для работы с разными LLM провайдерами."""
 
-    def __init__(self, config: LLMConfig, cache=None):
+    def __init__(self, config: LLMConfig, cache: Optional[CacheProtocol] = None):
         """
         Args:
             config: конфигурация LLM
-            cache: экземпляр CacheSkill, опционально
+            cache: экземпляр, реализующий CacheProtocol (опционально)
         """
         self.config = config
         self.cache = cache
-        self.engine = self._init_engine()
+        self.engine: Optional[BaseLLMEngine] = self._init_engine()
         self.tokens_used: int = 0
-        logger.debug(f"LLMAdapter инициализирован с провайдером {config.provider}")
+        logger.debug("LLMAdapter инициализирован с провайдером %s", config.provider)
 
-    def _init_engine(self):
-        """Инициализирует нужный engine по провайдеру"""
+    def _init_engine(self) -> Optional[BaseLLMEngine]:
+        """Инициализирует нужный engine по провайдеру."""
         engines = {
             LLMProvider.OPENAI: OpenAIEngine,
             LLMProvider.CLAUDE: ClaudeEngine,
@@ -54,21 +58,17 @@ class LLMAdapter:
 
         return engine_class(self.config)
 
+    # ── public ────────────────────────────────────────────────────
+
     def call(self, prompt: str) -> str:
         """
         Основной метод вызова LLM.
-        Включает cache check, retry логику и подсчёт токенов.
-
-        Args:
-            prompt: промпт для LLM
-
-        Returns:
-            ответ от LLM
+        Проверяет кэш → вызывает engine с retry → сохраняет в кэш.
         """
         # Проверяем кэш
         if self.cache:
             cached = self.cache.get(prompt)
-            if cached:
+            if cached is not None:
                 logger.debug("Ответ получен из кэша")
                 return cached
 
@@ -85,40 +85,33 @@ class LLMAdapter:
 
         return response
 
+    @retry(
+        stop=stop_after_attempt(MAX_RETRIES),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type(Exception),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
     def _call_with_retry(self, prompt: str) -> str:
-        """Вызов engine с retry логикой"""
-        last_error: Optional[Exception] = None
-
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                logger.debug(f"Попытка {attempt}/{MAX_RETRIES}")
-                response, tokens = self.engine.call(prompt)
-                self.tokens_used += tokens
-                return response
-
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Попытка {attempt} неудачна: {e}")
-                if attempt < MAX_RETRIES:
-                    time.sleep(RETRY_DELAY)
-
-        raise RuntimeError(f"Все {MAX_RETRIES} попытки исчерпаны. "
-                           f"Последняя ошибка: {last_error}")
+        """Вызов engine с retry логикой через tenacity."""
+        assert self.engine is not None, "Engine не инициализирован"
+        response, tokens = self.engine.call(prompt)
+        self.tokens_used += tokens
+        return response
 
     def _call_mock(self, prompt: str) -> str:
-        """Mock ответ для тестирования"""
-        import json
-        logger.debug(f"MOCK вызов с промптом: {prompt[:100]}...")
+        """Mock ответ для тестирования."""
+        logger.debug("MOCK вызов с промптом: %s...", prompt[:100])
         return json.dumps({
             "reason_short": "Mock reason",
             "reason_long": "This is a mock response for testing",
-            "confidence": 1.0
+            "confidence": 1.0,
         })
 
     def get_tokens_used(self) -> int:
-        """Возвращает суммарное количество использованных токенов"""
+        """Возвращает суммарное количество использованных токенов."""
         return self.tokens_used
 
     def reset_tokens(self) -> None:
-        """Сбрасывает счётчик токенов"""
+        """Сбрасывает счётчик токенов."""
         self.tokens_used = 0
