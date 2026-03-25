@@ -9,10 +9,10 @@ import time
 from typing import Optional
 
 # TODO создать минимально рабочий набор для обкатки
-from core.base_agent import LLMConfig, LLMProvider
-from core.llm.engines.openai_engine import OpenAIEngine
-from core.llm.engines.claude_engine import ClaudeEngine
-from core.llm.engines.gemini_engine import GeminiEngine
+from agents.core.base_agent import LLMConfig, LLMProvider
+from agents.core.llm.engines.openai_engine import OpenAIEngine
+from agents.core.llm.engines.claude_engine import ClaudeEngine
+from agents.core.llm.engines.gemini_engine import GeminiEngine
 
 logger = logging.getLogger(__name__)
 
