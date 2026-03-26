@@ -1,38 +1,54 @@
 """
-Google Gemini engine.
-TODO: реализовать полноценный вызов Google Generative AI API.
+In-memory кэш для LLM ответов.
+Реализует CacheProtocol из base_agent.py.
 """
 import logging
-from typing import Tuple
-
-from agents.core.base_agent import LLMConfig
-from agents.core.llm.engines.base_engine import BaseLLMEngine
+import threading
+from collections import OrderedDict
+from typing import Optional
 
 
 logger = logging.getLogger(__name__)
 
 
-class GeminiEngine(BaseLLMEngine):
-    """Engine для работы с Google Gemini API."""
+class InMemoryCache:
+    """
+    Простой in-memory LRU кэш.
 
-    def __init__(self, config: LLMConfig):
-        super().__init__(config)
-        logger.debug("GeminiEngine создан для модели %s", config.model)
+    Реализует CacheProtocol для использования в LLMAdapter.
+    Потокобезопасный.
+    """
 
-    def call(self, prompt: str) -> Tuple[str, int]:
-        """
-        Вызов Google Generative AI API.
+    def __init__(self, max_size: int = 1000):
+        self._max_size = max_size
+        self._cache: OrderedDict[str, str] = OrderedDict()
+        self._lock = threading.Lock()
 
-        TODO: реализовать:
-            import google.generativeai as genai
-            genai.configure(api_key=...)
-            model = genai.GenerativeModel(self.config.model)
-            response = model.generate_content(prompt)
-            text = response.text
-            tokens = response.usage_metadata.total_token_count
-            return text, tokens
-        """
-        raise NotImplementedError(
-            "GeminiEngine.call() ещё не реализован. "
-            "Используйте LLMProvider.MOCK для тестирования."
-        )
+    def get(self, key: str) -> Optional[str]:
+        """Получить значение из кэша. None если не найдено."""
+        with self._lock:
+            if key in self._cache:
+                # LRU: перемещаем в конец
+                self._cache.move_to_end(key)
+                return self._cache[key]
+            return None
+
+    def set(self, key: str, value: str) -> None:
+        """Сохранить значение в кэш. Вытесняет старые при переполнении."""
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            self._cache[key] = value
+            if len(self._cache) > self._max_size:
+                evicted_key, _ = self._cache.popitem(last=False)
+                logger.debug("Кэш: вытеснён ключ %s", evicted_key[:16])
+
+    def clear(self) -> None:
+        """Очистить весь кэш."""
+        with self._lock:
+            self._cache.clear()
+
+    def size(self) -> int:
+        """Текущий размер кэша."""
+        with self._lock:
+            return len(self._cache)

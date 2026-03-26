@@ -79,14 +79,6 @@ def load_agent_config(
 ) -> AgentConfig:
     """
     Собирает полную конфигурацию агента из env.
-
-    Args:
-        provider: переопределение провайдера (приоритет над env)
-        model: переопределение модели (приоритет над env)
-        cache_enabled: включить кэш
-
-    Returns:
-        AgentConfig
     """
     config = AgentConfig(
         mode=AgentMode.API,
@@ -96,7 +88,7 @@ def load_agent_config(
     )
     logger.info(
         "Загружена конфигурация: provider=%s, model=%s, cache=%s",
-        config.llm_config.provider.value,
+        config.llm_config.provider,
         config.llm_config.model,
         config.cache_enabled,
     )

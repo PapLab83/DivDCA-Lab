@@ -10,39 +10,15 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from enum import Enum
+from enum import StrEnum
 from typing import Optional, Dict, Any, Protocol, Tuple, runtime_checkable
 
-
-__all__ = [
-    "LLMParseError",
-    "LLMAdapterProtocol",
-    "AsyncLLMAdapterProtocol",
-    "PromptManagerProtocol",
-    "CacheProtocol",
-    "AgentMode",
-    "LLMProvider",
-    "LLMConfig",
-    "ApiConfig",
-    "AgentConfig",
-    "AgentContext",
-    "FinancialAgentContext",
-    "AgentResult",
-    "BaseAgent",
-]
+from agents.core.llm.exceptions import (
+    LLMParseError,
+)
 
 
 logger = logging.getLogger(__name__)
-
-
-# ─────────────────────────── Exceptions ───────────────────────────
-
-class LLMParseError(Exception):
-    """Ошибка парсинга ответа от LLM"""
-
-    def __init__(self, message: str, raw_response: str):
-        self.raw_response = raw_response
-        super().__init__(message)
 
 
 # ─────────────────────────── Protocols ────────────────────────────
@@ -80,12 +56,12 @@ class CacheProtocol(Protocol):
 
 # ─────────────────────────── Enums ────────────────────────────────
 
-class AgentMode(str, Enum):
+class AgentMode(str, StrEnum):
     """Режимы работы агента"""
     API = "api"
 
 
-class LLMProvider(str, Enum):
+class LLMProvider(str, StrEnum):
     """Поддерживаемые LLM провайдеры"""
     OPENAI = "openai"
     CLAUDE = "claude"
@@ -330,33 +306,11 @@ class BaseAgent(ABC):
         return prompt, version
 
     def _call_llm(self, prompt: str) -> str:
-        """Вызов LLM адаптера с поддержкой retry."""
+        """Вызов LLM адаптера."""
         if not self.llm_adapter:
             raise RuntimeError("llm_adapter не инициализирован")
 
-        retries = self.config.api_config.retries
-        delay = self.config.api_config.retry_delay_seconds
-        last_error: Optional[Exception] = None
-
-        for attempt in range(1, retries + 1):
-            try:
-                return self.llm_adapter.call(prompt)
-            except Exception as e:
-                last_error = e
-                if attempt < retries:
-                    logger.warning(
-                        "LLM вызов (попытка %d/%d) неудачен: %s. Повтор через %.1fс",
-                        attempt, retries, e, delay,
-                    )
-                    time.sleep(delay)
-                    delay *= 2  # exponential backoff
-                else:
-                    logger.error(
-                        "LLM вызов исчерпал все %d попыток: %s",
-                        retries, e,
-                    )
-
-        raise last_error  # type: ignore[misc]
+        return self.llm_adapter.call(prompt)
 
     async def _call_llm_async(self, prompt: str) -> str:
         """Асинхронный вызов LLM адаптера с поддержкой retry."""
@@ -367,29 +321,7 @@ class BaseAgent(ABC):
                 "llm_adapter не реализует AsyncLLMAdapterProtocol"
             )
 
-        retries = self.config.api_config.retries
-        delay = self.config.api_config.retry_delay_seconds
-        last_error: Optional[Exception] = None
-
-        for attempt in range(1, retries + 1):
-            try:
-                return await self.llm_adapter.call(prompt)
-            except Exception as e:
-                last_error = e
-                if attempt < retries:
-                    logger.warning(
-                        "Async LLM вызов (попытка %d/%d) неудачен: %s. Повтор через %.1fс",
-                        attempt, retries, e, delay,
-                    )
-                    await asyncio.sleep(delay)
-                    delay *= 2
-                else:
-                    logger.error(
-                        "Async LLM вызов исчерпал все %d попыток: %s",
-                        retries, e,
-                    )
-
-        raise last_error  # type: ignore[misc]
+        return await self.llm_adapter.call(prompt)
 
     def _validate_result(self, result: Dict[str, Any]) -> bool:
         """

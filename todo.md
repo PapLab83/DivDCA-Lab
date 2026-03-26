@@ -41,8 +41,9 @@
      (+) Добавить минимальный тест
      (+) Конфигурация из env / yaml
      (-) Ревью: cache.py
+     (+) Ревью: agent_validator.py
      (-) Ревью: config.py
-     (-) Ревью: test_core.py
+     (+) Ревью: test_core.py
      (-) Агент получения событий (agent.py)
      (+) Базовый движок модели (core/llm/engines/base_engine.py)
      (+) Реализация OpenAI (openai_engine.py)

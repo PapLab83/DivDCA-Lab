@@ -34,6 +34,15 @@ class AgentFactory:
         self._agents: Dict[str, Type[BaseAgent]] = {}
         self._lock = threading.Lock()
 
+    @classmethod
+    def _reset(cls) -> None:
+        """
+        Сбрасывает singleton. Только для тестов.
+        После вызова следующий AgentFactory() создаст новый экземпляр.
+        """
+        with cls._init_lock:
+            cls._instance = None
+
     # ── регистрация ───────────────────────────────────────────────
 
     def register(self, agent_type: str, agent_class: Type[BaseAgent]) -> None:

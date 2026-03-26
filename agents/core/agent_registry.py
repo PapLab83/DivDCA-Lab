@@ -9,8 +9,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import yaml
-
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +74,13 @@ class AgentRegistry:
 
     def load_from_file(self, path: Path) -> None:
         """Загружает метаданные агентов из YAML-файла."""
+        try:
+            import yaml
+        except ImportError:
+            raise ImportError(
+                "PyYAML required for YAML configs: pip install pyyaml"
+            ) from None
+
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError(f"Ожидался dict в {path}, получен {type(data).__name__}")

@@ -1,8 +1,5 @@
 """
 Универсальный OpenAI-совместимый LLM engine.
-
-Работает с любым провайдером через GPT-тунель или напрямую:
-OpenAI, Claude, Gemini, Mistral, LLaMA и т.д.
 """
 
 import logging
@@ -16,15 +13,14 @@ try:
 except ImportError:
     HAS_OPENAI = False
 
-from agents.core.llm.engines.base_engine import (
-    BaseLLMEngine,
+from agents.core.base_agent import ApiConfig, LLMConfig
+from agents.core.llm.engines.base_engine import BaseLLMEngine, LLMResponse
+from agents.core.llm.exceptions import (
     LLMAuthenticationError,
-    LLMConfig,
     LLMConnectionError,
     LLMEngineError,
     LLMInvalidRequestError,
     LLMRateLimitError,
-    LLMResponse,
     LLMTimeoutError,
 )
 
@@ -34,36 +30,16 @@ logger = logging.getLogger(__name__)
 class OpenAICompatibleEngine(BaseLLMEngine):
     """
     Универсальный engine для любого OpenAI-совместимого API.
-
-    Работает с:
-        - OpenAI напрямую (base_url не нужен)
-        - GPT-тунель → Claude, Gemini, Mistral и т.д. (base_url обязателен)
-
-    Пример::
-
-        # OpenAI напрямую
-        config = LLMConfig(model="gpt-4o", api_key="sk-...")
-        engine = OpenAICompatibleEngine(config)
-
-        # Claude через тунель
-        config = LLMConfig(
-            model="claude-sonnet-4-20250514",
-            api_key="tunnel-key",
-            base_url="https://gpt-tunnel.example.com/v1",
-        )
-        engine = OpenAICompatibleEngine(config)
-
-        # Gemini через тунель
-        config = LLMConfig(
-            model="gemini-2.0-flash",
-            api_key="tunnel-key",
-            base_url="https://gpt-tunnel.example.com/v1",
-        )
-        engine = OpenAICompatibleEngine(config)
     """
 
-    def __init__(self, config: LLMConfig) -> None:
+    def __init__(self, config: LLMConfig, api_config: ApiConfig) -> None:
+        """
+        Args:
+            config: LLMConfig из base_agent.py
+            api_config: ApiConfig с ключом и base_url
+        """
         super().__init__(config)
+        self._api_config = api_config
 
         if not HAS_OPENAI:
             raise LLMEngineError(
@@ -76,9 +52,8 @@ class OpenAICompatibleEngine(BaseLLMEngine):
         self._async_client: AsyncOpenAI = AsyncOpenAI(**client_kwargs)
 
         logger.debug(
-            "OpenAICompatibleEngine создан: model=%s, base_url=%s",
+            "OpenAICompatibleEngine создан: model=%s",
             config.model,
-            config.base_url or "default",
         )
 
     # ─────────────────────────────────────────────
@@ -86,7 +61,7 @@ class OpenAICompatibleEngine(BaseLLMEngine):
     # ─────────────────────────────────────────────
 
     def call(self, prompt: str) -> LLMResponse:
-        """Синхронный вызов LLM."""
+        """Синхронный вызов LLM. Возвращает LLMResponse."""
         self._validate_prompt(prompt)
 
         try:
@@ -121,7 +96,7 @@ class OpenAICompatibleEngine(BaseLLMEngine):
     # ─────────────────────────────────────────────
 
     async def acall(self, prompt: str) -> LLMResponse:
-        """Асинхронный вызов LLM."""
+        """Асинхронный вызов LLM. Возвращает LLMResponse."""
         self._validate_prompt(prompt)
 
         try:
@@ -156,24 +131,22 @@ class OpenAICompatibleEngine(BaseLLMEngine):
     # ─────────────────────────────────────────────
 
     def _build_client_kwargs(self) -> dict:
-        """Kwargs для инициализации клиентов."""
+        """Kwargs для инициализации клиентов. Использует ApiConfig."""
         kwargs: dict = {
-            "api_key": self.config.api_key,
-            "timeout": self.config.timeout,
-            "max_retries": self.config.max_retries,
+            "api_key": self._api_config.api_key,
+            "timeout": self._api_config.timeout_seconds,
         }
-        if self.config.base_url:
-            kwargs["base_url"] = self.config.base_url
+        if self._api_config.base_url:
+            kwargs["base_url"] = self._api_config.base_url
         return kwargs
 
     def _build_request_kwargs(self, prompt: str) -> dict:
-        """Kwargs для каждого запроса (DRY для call/stream/acall/astream)."""
+        """Kwargs для каждого запроса."""
         return {
             "model": self.config.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens,
-            **self.config.extra,
         }
 
     @staticmethod
@@ -184,7 +157,7 @@ class OpenAICompatibleEngine(BaseLLMEngine):
 
     @staticmethod
     def _parse_response(response) -> LLMResponse:
-        """Парсит ответ в LLMResponse."""
+        """Парсит ответ OpenAI в LLMResponse."""
         choice = response.choices[0]
         usage = response.usage
 
@@ -199,7 +172,7 @@ class OpenAICompatibleEngine(BaseLLMEngine):
 
     @staticmethod
     def _map_exception(exc: Exception) -> LLMEngineError:
-        """Маппинг openai exceptions → LLMEngineError."""
+        """Маппинг openai exceptions → наша иерархия."""
         if not HAS_OPENAI:
             return LLMEngineError(str(exc))
 

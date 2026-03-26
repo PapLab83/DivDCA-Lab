@@ -16,8 +16,8 @@ from tenacity import (
     before_sleep_log,
 )
 
-from agents.core.base_agent import LLMConfig, LLMProvider, CacheProtocol
-from agents.core.llm.engines.base_engine import BaseLLMEngine
+from agents.core.base_agent import ApiConfig, LLMConfig, LLMProvider, CacheProtocol
+from agents.core.llm.engines.base_engine import BaseLLMEngine, LLMResponse
 from agents.core.llm.engines.openai_engine import OpenAIEngine
 from agents.core.llm.engines.claude_engine import ClaudeEngine
 from agents.core.llm.engines.gemini_engine import GeminiEngine
@@ -31,13 +31,20 @@ MAX_RETRIES = 3
 class LLMAdapter:
     """Единый интерфейс для работы с разными LLM провайдерами."""
 
-    def __init__(self, config: LLMConfig, cache: Optional[CacheProtocol] = None):
+    def __init__(
+        self,
+        config: LLMConfig,
+        api_config: Optional[ApiConfig] = None,
+        cache: Optional[CacheProtocol] = None,
+    ):
         """
         Args:
-            config: конфигурация LLM
+            config: конфигурация LLM (из base_agent.py)
+            api_config: конфигурация API-подключения (ключ, base_url)
             cache: экземпляр, реализующий CacheProtocol (опционально)
         """
         self.config = config
+        self.api_config = api_config or ApiConfig()
         self.cache = cache
         self.engine: Optional[BaseLLMEngine] = self._init_engine()
         self._tokens_used: int = 0
@@ -59,7 +66,7 @@ class LLMAdapter:
         if not engine_class:
             raise ValueError(f"Неизвестный провайдер: {self.config.provider}")
 
-        return engine_class(self.config)
+        return engine_class(self.config, self.api_config)
 
     # ── helpers ───────────────────────────────────────────────────
 
@@ -73,7 +80,10 @@ class LLMAdapter:
     def call(self, prompt: str) -> str:
         """
         Основной метод вызова LLM.
-        Проверяет кэш → вызывает engine с retry → сохраняет в кэш.
+        Проверяет кэш → вызывает engine/mock → сохраняет в кэш.
+
+        Returns:
+            Текст ответа от LLM
         """
         # Проверяем кэш
         if self.cache:
@@ -83,12 +93,11 @@ class LLMAdapter:
                 logger.debug("Ответ получен из кэша")
                 return cached
 
-        # Mock режим
+        # Получаем ответ (mock или реальный engine)
         if self.config.provider == LLMProvider.MOCK:
-            return self._call_mock(prompt)
-
-        # Вызов с retry
-        response = self._call_with_retry(prompt)
+            response = self._call_mock(prompt)
+        else:
+            response = self._call_with_retry(prompt)
 
         # Сохраняем в кэш
         if self.cache:
@@ -105,23 +114,28 @@ class LLMAdapter:
         reraise=True,
     )
     def _call_with_retry(self, prompt: str) -> str:
-        """Вызов engine с retry логикой через tenacity."""
+        """
+        Вызов engine с retry логикой через tenacity.
+
+        Returns:
+            Текст ответа (str), токены учитываются внутри.
+        """
         if self.engine is None:
             raise RuntimeError(
                 f"Engine не инициализирован для провайдера {self.config.provider}"
             )
 
         try:
-            response, tokens = self.engine.call(prompt)
+            llm_response: LLMResponse = self.engine.call(prompt)
         except LLMTransientError:
             raise
         except Exception as exc:
             raise RuntimeError(f"Неожиданная ошибка LLM: {exc}") from exc
 
         with self._lock:
-            self._tokens_used += tokens
+            self._tokens_used += llm_response.tokens_used
 
-        return response
+        return llm_response.text
 
     def _call_mock(self, prompt: str) -> str:
         """Mock ответ для тестирования."""

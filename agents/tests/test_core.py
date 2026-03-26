@@ -11,10 +11,10 @@ from agents.core.base_agent import (
     AgentResult,
     BaseAgent,
     LLMConfig,
-    LLMParseError,
     LLMProvider,
     ApiConfig,
 )
+from agents.core.llm.exceptions import LLMParseError
 from agents.core.agent_factory import AgentFactory
 from agents.core.agent_registry import AgentRegistry, AgentMetadata
 from agents.core.llm.adapter import LLMAdapter
@@ -203,9 +203,14 @@ class TestLLMAdapter:
         cache = InMemoryCache()
         adapter = LLMAdapter(config, cache=cache)
 
-        # Первый вызов — cache miss
+        # Первый вызов — cache miss, сохраняет в кэш
         response1 = adapter.call("test prompt")
-        assert cache.size() == 0  # mock не сохраняет в кэш (mock обходит кэш)
+        assert cache.size() == 1
+
+        # Второй вызов — cache hit
+        response2 = adapter.call("test prompt")
+        assert response1 == response2
+        assert cache.size() == 1
 
     def test_tokens_tracking(self):
         config = LLMConfig(provider=LLMProvider.MOCK)
