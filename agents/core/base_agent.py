@@ -297,15 +297,21 @@ class BaseAgent(ABC):
         return self.llm_adapter.call(prompt)
 
     async def _call_llm_async(self, prompt: str) -> str:
-        """Асинхронный вызов LLM адаптера с поддержкой retry."""
-        import asyncio
+        """Асинхронный вызов LLM адаптера."""
+        if not self.llm_adapter:
+            raise RuntimeError("llm_adapter не инициализирован")
 
-        if not isinstance(self.llm_adapter, AsyncLLMAdapterProtocol):
-            raise RuntimeError(
-                "llm_adapter не реализует AsyncLLMAdapterProtocol"
-            )
+        # Предпочитаем acall если доступен (LLMAdapter),
+        # fallback на AsyncLLMAdapterProtocol.call
+        if hasattr(self.llm_adapter, "acall"):
+            return await self.llm_adapter.acall(prompt)
 
-        return await self.llm_adapter.call(prompt)
+        if isinstance(self.llm_adapter, AsyncLLMAdapterProtocol):
+            return await self.llm_adapter.call(prompt)
+
+        raise RuntimeError(
+            "llm_adapter не поддерживает async: нет acall() и не реализует AsyncLLMAdapterProtocol"
+        )
 
     def _validate_result(self, result: Dict[str, Any]) -> bool:
         """

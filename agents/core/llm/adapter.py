@@ -150,6 +150,73 @@ class LLMAdapter:
 
         return llm_response.text
 
+    from tenacity import (
+        retry,
+        stop_after_attempt,
+        wait_exponential,
+        retry_if_exception_type,
+        before_sleep_log,
+    )
+
+    # ... существующий код класса LLMAdapter ...
+
+    # ── async public ──────────────────────────────────────────
+
+    async def acall(self, prompt: str) -> str:
+        """
+        Асинхронный вызов LLM.
+        Проверяет кэш → вызывает engine/mock → сохраняет в кэш.
+        """
+        # Проверяем кэш
+        if self.cache:
+            key = self._cache_key(prompt)
+            cached = self.cache.get(key)
+            if cached is not None:
+                logger.debug("Async: ответ получен из кэша")
+                return cached
+
+        # Получаем ответ
+        if self.config.provider == LLMProvider.MOCK:
+            response = self._call_mock(prompt)
+        else:
+            response = await self._acall_with_retry(prompt)
+
+        # Сохраняем в кэш
+        if self.cache:
+            key = self._cache_key(prompt)
+            self.cache.set(key, response)
+
+        return response
+
+    @retry(
+        stop=stop_after_attempt(MAX_RETRIES),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type(LLMTransientError),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def _acall_with_retry(self, prompt: str) -> str:
+        """
+        Async вызов engine с retry логикой через tenacity.
+        Зеркалит _call_with_retry, но использует engine.acall().
+        """
+        if self.engine is None:
+            raise RuntimeError(
+                f"Engine не инициализирован для провайдера {self.config.provider}"
+            )
+
+        try:
+            llm_response: LLMResponse = await self.engine.acall(prompt)
+        except LLMTransientError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"Неожиданная ошибка LLM: {exc}") from exc
+
+        with self._lock:
+            self._tokens_used += llm_response.tokens_used
+
+        return llm_response.text
+
     def _call_mock(self, prompt: str) -> str:
         """Mock ответ для тестирования."""
         logger.debug("MOCK вызов с промптом: %s...", prompt[:100])
