@@ -21,6 +21,7 @@ from agents.core.llm.engines.base_engine import BaseLLMEngine, LLMResponse
 from agents.core.llm.engines.openai_engine import OpenAIEngine
 from agents.core.llm.engines.claude_engine import ClaudeEngine
 from agents.core.llm.engines.gemini_engine import GeminiEngine
+from agents.core.llm.engines.mock_enginge import MockEngine
 from agents.core.llm.exceptions import LLMTransientError
 
 logger = logging.getLogger(__name__)
@@ -57,14 +58,15 @@ class LLMAdapter:
             LLMProvider.OPENAI: OpenAIEngine,
             LLMProvider.CLAUDE: ClaudeEngine,
             LLMProvider.GEMINI: GeminiEngine,
+            LLMProvider.MOCK: MockEngine,
         }
-
-        if self.config.provider == LLMProvider.MOCK:
-            return None
 
         engine_class = engines.get(self.config.provider)
         if not engine_class:
             raise ValueError(f"Неизвестный провайдер: {self.config.provider}")
+
+        if self.config.provider == LLMProvider.MOCK:
+            return engine_class(self.config)
 
         return engine_class(self.config, self.api_config)
 
@@ -106,11 +108,7 @@ class LLMAdapter:
                 logger.debug("Ответ получен из кэша")
                 return cached
 
-        # Получаем ответ (mock или реальный engine)
-        if self.config.provider == LLMProvider.MOCK:
-            response = self._call_mock(prompt)
-        else:
-            response = self._call_with_retry(prompt)
+        response = self._call_with_retry(prompt)
 
         # Сохраняем в кэш
         if self.cache:
@@ -166,10 +164,7 @@ class LLMAdapter:
                 return cached
 
         # Получаем ответ
-        if self.config.provider == LLMProvider.MOCK:
-            response = self._call_mock(prompt)
-        else:
-            response = await self._acall_with_retry(prompt)
+        response = await self._acall_with_retry(prompt)
 
         # Сохраняем в кэш
         if self.cache:
@@ -206,15 +201,6 @@ class LLMAdapter:
             self._tokens_used += llm_response.tokens_used
 
         return llm_response.text
-
-    def _call_mock(self, prompt: str) -> str:
-        """Mock ответ для тестирования."""
-        logger.debug("MOCK вызов с промптом: %s...", prompt[:100])
-        return json.dumps({
-            "reason_short": "Mock reason",
-            "reason_long": "This is a mock response for testing",
-            "confidence": 1.0,
-        })
 
     def get_tokens_used(self) -> int:
         """Возвращает суммарное количество использованных токенов."""
