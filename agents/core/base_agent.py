@@ -237,6 +237,7 @@ class BaseAgent(ABC):
     async def execute_async(self, context: AgentContext) -> AgentResult:
         """Асинхронное выполнение агента."""
         start_time = time.monotonic()
+        result = AgentResult(success=False, error="Unexpected")
         try:
             logger.info(
                 "Async запуск агента %s (task=%s, agent_id=%s)",
