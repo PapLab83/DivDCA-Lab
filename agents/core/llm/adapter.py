@@ -150,16 +150,6 @@ class LLMAdapter:
 
         return llm_response.text
 
-    from tenacity import (
-        retry,
-        stop_after_attempt,
-        wait_exponential,
-        retry_if_exception_type,
-        before_sleep_log,
-    )
-
-    # ... существующий код класса LLMAdapter ...
-
     # ── async public ──────────────────────────────────────────
 
     async def acall(self, prompt: str) -> str:

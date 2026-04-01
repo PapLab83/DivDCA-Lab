@@ -1,19 +1,5 @@
 """
 Фабрика для создания агентов.
-Поддерживает ручную регистрацию и декоратор @register_agent.
-"""
-import logging
-import threading
-from typing import Dict, List, Optional, Type
-
-from agents.core.base_agent import AgentConfig, BaseAgent, LLMAdapterProtocol
-
-
-logger = logging.getLogger(__name__)
-
-
-"""
-Фабрика для создания агентов.
 Опционально связана с AgentRegistry и AgentValidator для проверки совместимости.
 """
 import logging

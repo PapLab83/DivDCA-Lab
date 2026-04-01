@@ -217,6 +217,7 @@ class BaseAgent(ABC):
     def execute(self, context: AgentContext) -> AgentResult:
         """Синхронное выполнение агента."""
         start_time = time.monotonic()
+        result = AgentResult(success=False, error="Unexpected")  # default
         try:
             logger.info(
                 "Запуск агента %s (task=%s, agent_id=%s)",
