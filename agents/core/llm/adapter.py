@@ -26,8 +26,6 @@ from agents.core.llm.exceptions import LLMTransientError
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 3
-
 
 class LLMAdapter:
     """Единый интерфейс для работы с разными LLM провайдерами."""
@@ -50,7 +48,56 @@ class LLMAdapter:
         self.engine: Optional[BaseLLMEngine] = self._init_engine()
         self._tokens_used: int = 0
         self._lock = threading.Lock()
+
+        # Создаём retry-обёртки с параметрами из api_config
+        self._call_with_retry = self._make_retry(self._call_engine)
+        self._acall_with_retry = self._make_retry(self._acall_engine)
+
         logger.debug("LLMAdapter инициализирован с провайдером %s", config.provider)
+
+    def _make_retry(self, fn):
+        """Оборачивает функцию retry-логикой с параметрами из api_config."""
+        return retry(
+            stop=stop_after_attempt(self.api_config.retries),  # ← из конфига
+            wait=wait_exponential(multiplier=1, min=1, max=10),
+            retry=retry_if_exception_type(LLMTransientError),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=True,
+        )(fn)
+
+    def _call_engine(self, prompt: str) -> str:
+        """Один вызов engine (без retry)."""
+        if self.engine is None:
+            raise RuntimeError(
+                f"Engine не инициализирован для {self.config.provider}"
+            )
+        try:
+            llm_response: LLMResponse = self.engine.call(prompt)
+        except LLMTransientError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"Неожиданная ошибка LLM: {exc}") from exc
+
+        with self._lock:
+            self._tokens_used += llm_response.tokens_used
+        return llm_response.text
+
+    async def _acall_engine(self, prompt: str) -> str:
+        """Один async вызов engine (без retry)."""
+        if self.engine is None:
+            raise RuntimeError(
+                f"Engine не инициализирован для {self.config.provider}"
+            )
+        try:
+            llm_response: LLMResponse = await self.engine.acall(prompt)
+        except LLMTransientError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"Неожиданная ошибка LLM: {exc}") from exc
+
+        with self._lock:
+            self._tokens_used += llm_response.tokens_used
+        return llm_response.text
 
     def _init_engine(self) -> Optional[BaseLLMEngine]:
         """Инициализирует нужный engine по провайдеру."""
