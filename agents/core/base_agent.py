@@ -180,90 +180,74 @@ class BaseAgent(ABC):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(mode={self.config.mode})"
 
-    # ── public ────────────────────────────────────────────────────
+
+
+    # ── private: общая обёртка ────────────────────────────────────
+
+    def _wrap_result(
+            self,
+            context: AgentContext,
+            start_time: float,
+            result: AgentResult,
+    ) -> AgentResult:
+        """Добавляет метаданные, duration, логирует. Вызывается из finally."""
+        self._cleanup(context)
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        result = replace(
+            result,
+            duration_ms=duration_ms,
+            metadata={**result.metadata, "agent_class": self.__class__.__name__},
+        )
+        self._log_usage(result)
+        return result
+
+    def _safe_handle_error(self, error: Exception) -> AgentResult:
+        """handle_error с защитой от исключений внутри самого handler."""
+        try:
+            return self._handle_error(error)
+        except Exception as inner:
+            logger.critical("Ошибка в _handle_error: %s", inner, exc_info=True)
+            return AgentResult(
+                success=False,
+                error=f"Critical: {inner.__class__.__name__}: {inner}",
+            )
+
+    # ── public: sync ──────────────────────────────────────────────
 
     def execute(self, context: AgentContext) -> AgentResult:
-        """
-        Основной метод выполнения агента.
-        Содержит обёртку с замерами времени и обработкой ошибок.
-        """
+        """Синхронное выполнение агента."""
         start_time = time.monotonic()
-        result: AgentResult
-
         try:
             logger.info(
                 "Запуск агента %s (task=%s, agent_id=%s)",
                 self.__class__.__name__, context.task, context.agent_id,
             )
-
             self._setup(context)
             result = self._execute_internal(context)
-
-            result = replace(
-                result,
-                metadata={**result.metadata, "agent_class": self.__class__.__name__},
-            )
-
         except Exception as e:
             logger.error("Ошибка в агенте %s: %s", self.__class__.__name__, e, exc_info=True)
-            try:
-                result = self._handle_error(e)
-            except Exception as inner:
-                logger.critical("Ошибка в _handle_error: %s", inner, exc_info=True)
-                result = AgentResult(
-                    success=False,
-                    error=f"Critical: {inner.__class__.__name__}: {inner}",
-                    metadata={"agent_class": self.__class__.__name__},
-                )
-
+            result = self._safe_handle_error(e)
         finally:
-            self._cleanup(context)
-            duration_ms = int((time.monotonic() - start_time) * 1000)
-            result = replace(result, duration_ms=duration_ms)
-            self._log_usage(result)
-
+            result = self._wrap_result(context, start_time, result)
         return result
 
-    async def execute_async(self, context: AgentContext) -> AgentResult:
-        """
-        Асинхронный метод выполнения агента.
-        Использует AsyncLLMAdapterProtocol для вызовов LLM.
-        """
-        start_time = time.monotonic()
-        result: AgentResult
+    # ── public: async ─────────────────────────────────────────────
 
+    async def execute_async(self, context: AgentContext) -> AgentResult:
+        """Асинхронное выполнение агента."""
+        start_time = time.monotonic()
         try:
             logger.info(
                 "Async запуск агента %s (task=%s, agent_id=%s)",
                 self.__class__.__name__, context.task, context.agent_id,
             )
-
             self._setup(context)
             result = await self._execute_internal_async(context)
-
-            result = replace(
-                result,
-                metadata={**result.metadata, "agent_class": self.__class__.__name__},
-            )
-
         except Exception as e:
             logger.error("Ошибка в агенте %s: %s", self.__class__.__name__, e, exc_info=True)
-            try:
-                result = self._handle_error(e)
-            except Exception as inner:
-                logger.critical("Ошибка в _handle_error: %s", inner, exc_info=True)
-                result = AgentResult(
-                    success=False,
-                    error=f"Critical: {inner.__class__.__name__}: {inner}",
-                    metadata={"agent_class": self.__class__.__name__},
-                )
-
+            result = self._safe_handle_error(e)
         finally:
-            self._cleanup(context)
-            duration_ms = int((time.monotonic() - start_time) * 1000)
-            result = replace(result, duration_ms=duration_ms)
-            self._log_usage(result)
-
+            result = self._wrap_result(context, start_time, result)
         return result
 
     # ── abstract ──────────────────────────────────────────────────
