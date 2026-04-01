@@ -224,6 +224,50 @@ class TestLLMAdapter:
         adapter.reset_tokens()
         assert adapter.get_tokens_used() == 0
 
+    def test_cache_key_includes_model_params(self):
+        """Разные параметры → разные ключи кэша."""
+        config1 = LLMConfig(provider=LLMProvider.MOCK, model="gpt-4", temperature=0.7)
+        config2 = LLMConfig(provider=LLMProvider.MOCK, model="gpt-3.5", temperature=0.7)
+        config3 = LLMConfig(provider=LLMProvider.MOCK, model="gpt-4", temperature=0.3)
+
+        adapter1 = LLMAdapter(config1)
+        adapter2 = LLMAdapter(config2)
+        adapter3 = LLMAdapter(config3)
+
+        prompt = "same prompt"
+        key1 = adapter1._cache_key(prompt)
+        key2 = adapter2._cache_key(prompt)
+        key3 = adapter3._cache_key(prompt)
+
+        # Все ключи разные
+        assert key1 != key2, "Разные модели должны давать разные ключи"
+        assert key1 != key3, "Разная temperature должна давать разные ключи"
+        assert key2 != key3
+
+    def test_cache_key_same_params_same_key(self):
+        """Одинаковые параметры → одинаковый ключ."""
+        config = LLMConfig(provider=LLMProvider.MOCK, model="gpt-4", temperature=0.7)
+        adapter1 = LLMAdapter(config)
+        adapter2 = LLMAdapter(config)
+
+        assert adapter1._cache_key("test") == adapter2._cache_key("test")
+
+    def test_different_configs_no_cache_collision(self):
+        """Разные конфиги с общим кэшем не пересекаются."""
+        cache = InMemoryCache()
+
+        config_a = LLMConfig(provider=LLMProvider.MOCK, model="gpt-4")
+        config_b = LLMConfig(provider=LLMProvider.MOCK, model="gpt-3.5")
+
+        adapter_a = LLMAdapter(config_a, cache=cache)
+        adapter_b = LLMAdapter(config_b, cache=cache)
+
+        response_a = adapter_a.call("test prompt")
+        response_b = adapter_b.call("test prompt")
+
+        # Оба ответа в кэше как отдельные записи
+        assert cache.size() == 2
+
 
 # ─────────────────────────── InMemoryCache ────────────────────────
 

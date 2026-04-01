@@ -70,10 +70,23 @@ class LLMAdapter:
 
     # ── helpers ───────────────────────────────────────────────────
 
-    @staticmethod
-    def _cache_key(prompt: str) -> str:
-        """Генерирует компактный ключ кэша из промпта."""
-        return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    def _cache_key(self, prompt: str) -> str:
+        """
+        Генерирует ключ кэша из промпта + всех параметров,
+        влияющих на ответ LLM.
+
+        Одинаковый промпт с разными provider/model/temperature
+        даст разные ключи → разные записи в кэше.
+        """
+        components = (
+            prompt,
+            str(self.config.provider),
+            self.config.model,
+            f"{self.config.temperature:.4f}",
+            str(self.config.max_tokens),
+        )
+        combined = "|".join(components)
+        return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
     # ── public ────────────────────────────────────────────────────
 
