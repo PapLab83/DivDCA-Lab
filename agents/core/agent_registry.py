@@ -1,13 +1,15 @@
 """
 Реестр метаданных агентов.
-Хранит описание, версию, входные/выходные данные каждого агента.
-Не содержит бизнес-логики валидации.
+Хранит описание, версию, входные/выходные данные и класс каждого агента.
+Единый источник правды — Factory делегирует хранение классов сюда.
 """
 import logging
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Type
+
+from agents.core.base_agent import BaseAgent
 
 
 logger = logging.getLogger(__name__)
@@ -15,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AgentMetadata:
-    """Метаданные агента"""
+    """Метаданные агента."""
     name: str
     description: str
     version: str
@@ -23,6 +25,7 @@ class AgentMetadata:
     outputs: List[str]
     prompt_components: List[str] = field(default_factory=list)
     supported_providers: List[str] = field(default_factory=list)
+    agent_class: Optional[Type[BaseAgent]] = field(default=None, repr=False)
 
 
 class AgentNotFoundError(KeyError):
@@ -32,7 +35,10 @@ class AgentNotFoundError(KeyError):
 class AgentRegistry:
     """
     Реестр всех доступных агентов.
-    Единственная ответственность — хранение и доступ к метаданным.
+
+    Хранит метаданные И (опционально) классы агентов.
+    Factory делегирует хранение классов сюда, чтобы избежать
+    двойного реестра и рассинхронизации.
     """
 
     def __init__(self, load_defaults: bool = True):
@@ -86,16 +92,67 @@ class AgentRegistry:
             raise ValueError(f"Ожидался dict в {path}, получен {type(data).__name__}")
         with self._lock:
             for key, meta in data.items():
+                # agent_class не загружается из YAML — только метаданные
                 self._agents[key] = AgentMetadata(**meta)
         logger.debug("Загружено %d агентов из %s", len(data), path)
 
     # ── CRUD ──────────────────────────────────────────────────────
 
-    def register(self, agent_type: str, metadata: AgentMetadata) -> None:
+    def register(
+        self,
+        agent_type: str,
+        metadata: AgentMetadata,
+    ) -> None:
         """Регистрирует метаданные агента."""
         with self._lock:
             self._agents[agent_type] = metadata
         logger.debug("Зарегистрированы метаданные для агента: %s", agent_type)
+
+    def bind_class(
+        self,
+        agent_type: str,
+        agent_class: Type[BaseAgent],
+    ) -> None:
+        """
+        Привязывает класс агента к существующим метаданным.
+        Если метаданных нет — создаёт минимальные автоматически.
+        """
+        if not issubclass(agent_class, BaseAgent):
+            raise TypeError(
+                f"{agent_class.__name__} должен быть наследником BaseAgent"
+            )
+        with self._lock:
+            if agent_type in self._agents:
+                existing = self._agents[agent_type]
+                # Обновляем только agent_class, метаданные сохраняем
+                self._agents[agent_type] = AgentMetadata(
+                    name=existing.name,
+                    description=existing.description,
+                    version=existing.version,
+                    inputs=existing.inputs,
+                    outputs=existing.outputs,
+                    prompt_components=existing.prompt_components,
+                    supported_providers=existing.supported_providers,
+                    agent_class=agent_class,
+                )
+            else:
+                # Автоматические метаданные для агентов без YAML-описания
+                self._agents[agent_type] = AgentMetadata(
+                    name=agent_class.__name__,
+                    description=f"Auto-registered: {agent_class.__name__}",
+                    version="0.0.0",
+                    inputs=[],
+                    outputs=[],
+                    agent_class=agent_class,
+                )
+                logger.warning(
+                    "Агент '%s' зарегистрирован без метаданных (auto-generated)",
+                    agent_type,
+                )
+        logger.debug(
+            "Привязан класс %s к агенту '%s'",
+            agent_class.__name__, agent_type,
+        )
 
     def unregister(self, agent_type: str) -> None:
         """Удаляет агента из реестра."""
@@ -120,10 +177,24 @@ class AgentRegistry:
                     f"Агент '{agent_type}' не найден в реестре"
                 ) from None
 
+    def get_class(self, agent_type: str) -> Optional[Type[BaseAgent]]:
+        """Возвращает класс агента или None."""
+        with self._lock:
+            meta = self._agents.get(agent_type)
+            return meta.agent_class if meta else None
+
     def list_agents(self) -> List[str]:
         """Список всех зарегистрированных агентов."""
         with self._lock:
             return list(self._agents.keys())
+
+    def list_bound_agents(self) -> List[str]:
+        """Список агентов с привязанным классом (готовых к созданию)."""
+        with self._lock:
+            return [
+                k for k, v in self._agents.items()
+                if v.agent_class is not None
+            ]
 
     def __contains__(self, agent_type: str) -> bool:
         with self._lock:
@@ -142,5 +213,6 @@ class AgentRegistry:
             f"Описание: {metadata.description}",
             f"Входные данные: {', '.join(metadata.inputs)}",
             f"Выходные данные: {', '.join(metadata.outputs)}",
+            f"Класс: {metadata.agent_class.__name__ if metadata.agent_class else '<не привязан>'}",
         ]
         return "\n".join(lines)

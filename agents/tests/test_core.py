@@ -1,8 +1,9 @@
 """
-Минимальные тесты для core-компонентов.
+Тесты для core-компонентов.
 Запуск: pytest agents/tests/test_core.py -v
 """
 import json
+
 import pytest
 
 from agents.core.base_agent import (
@@ -14,31 +15,17 @@ from agents.core.base_agent import (
     LLMProvider,
     ApiConfig,
 )
-from agents.core.llm.exceptions import LLMParseError
-from agents.core.agent_factory import AgentFactory
+from agents.core.llm.exceptions import LLMParseError, LLMEngineError
 from agents.core.agent_registry import AgentRegistry, AgentMetadata
 from agents.core.llm.adapter import LLMAdapter
+from agents.core.llm.engines.claude_engine import ClaudeEngine
+from agents.core.llm.engines.gemini_engine import GeminiEngine
 from agents.core.skills.cache import InMemoryCache
+
+from agents.tests.conftest import MockAgent, FailingAgent
 
 
 # ─────────────────────────── Fixtures ─────────────────────────────
-
-class MockAgent(BaseAgent):
-    """Тестовый агент для проверки BaseAgent."""
-
-    def _execute_internal(self, context: AgentContext) -> AgentResult:
-        return AgentResult(
-            success=True,
-            data={"message": "ok"},
-        )
-
-
-class FailingAgent(BaseAgent):
-    """Агент, который всегда падает."""
-
-    def _execute_internal(self, context: AgentContext) -> AgentResult:
-        raise ValueError("Тестовая ошибка")
-
 
 @pytest.fixture
 def mock_config() -> AgentConfig:
@@ -52,7 +39,7 @@ def context() -> AgentContext:
     return AgentContext(agent_id="test-001", task="test_task")
 
 
-# ─────────────────────────── BaseAgent ────────────────────────────
+# ─────────────────────────── BaseAgent (sync) ─────────────────────
 
 class TestBaseAgent:
     def test_execute_success(self, mock_config, context):
@@ -100,11 +87,114 @@ class TestBaseAgent:
             agent._call_llm("test prompt")
 
 
+# ─────────────────────────── BaseAgent (async) ────────────────────
+
+class TestBaseAgentAsync:
+    @pytest.mark.asyncio
+    async def test_execute_async_success(self, mock_config):
+        context = AgentContext(agent_id="async-001", task="async_test")
+        agent = MockAgent(mock_config)
+        result = await agent.execute_async(context)
+
+        assert result.success is True
+        assert result.data == {"message": "ok"}
+        assert result.duration_ms is not None
+        assert result.duration_ms >= 0
+        assert result.metadata["agent_class"] == "MockAgent"
+
+    @pytest.mark.asyncio
+    async def test_execute_async_error_handling(self, mock_config):
+        context = AgentContext(agent_id="async-002", task="async_fail")
+        agent = FailingAgent(mock_config)
+        result = await agent.execute_async(context)
+
+        assert result.success is False
+        assert "ValueError" in result.error
+        assert "Тестовая ошибка" in result.error
+
+    @pytest.mark.asyncio
+    async def test_execute_async_runs_in_thread(self, mock_config):
+        """Проверяем что sync _execute_internal не блокирует event loop."""
+        import asyncio
+        import threading
+
+        captured_thread = {}
+
+        class ThreadCapturingAgent(BaseAgent):
+            def _execute_internal(self, context):
+                captured_thread["name"] = threading.current_thread().name
+                return AgentResult(success=True, data={"thread": captured_thread["name"]})
+
+        context = AgentContext(agent_id="async-003", task="thread_test")
+        agent = ThreadCapturingAgent(mock_config)
+        result = await agent.execute_async(context)
+
+        assert result.success is True
+        # Должен выполняться НЕ в main thread (asyncio.to_thread)
+        main_thread = threading.main_thread().name
+        assert captured_thread["name"] != main_thread, (
+            f"_execute_internal должен выполняться в отдельном потоке, "
+            f"но выполнился в {captured_thread['name']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_call_llm_async_without_adapter_raises(self, mock_config):
+        agent = MockAgent(mock_config)
+        with pytest.raises(RuntimeError, match="llm_adapter не инициализирован"):
+            await agent._call_llm_async("test prompt")
+
+    @pytest.mark.asyncio
+    async def test_execute_async_with_custom_override(self, mock_config):
+        """Агент с настоящей async реализацией."""
+
+        class TrueAsyncAgent(BaseAgent):
+            def _execute_internal(self, context):
+                return AgentResult(success=False, error="sync fallback")
+
+            async def _execute_internal_async(self, context):
+                # Настоящая async логика
+                return AgentResult(success=True, data={"async": True})
+
+        context = AgentContext(agent_id="async-004", task="true_async")
+        agent = TrueAsyncAgent(mock_config)
+        result = await agent.execute_async(context)
+
+        assert result.success is True
+        assert result.data["async"] is True
+
+
+# ─────────────────────────── LLMAdapter (async) ──────────────────
+
+class TestLLMAdapterAsync:
+    @pytest.mark.asyncio
+    async def test_mock_acall(self):
+        config = LLMConfig(provider=LLMProvider.MOCK)
+        adapter = LLMAdapter(config)
+
+        response = await adapter.acall("test prompt")
+        data = json.loads(response)
+
+        assert "reason_short" in data
+        assert data["confidence"] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_mock_acall_with_cache(self):
+        config = LLMConfig(provider=LLMProvider.MOCK)
+        cache = InMemoryCache()
+        adapter = LLMAdapter(config, cache=cache)
+
+        response1 = await adapter.acall("test prompt")
+        assert cache.size() == 1
+
+        response2 = await adapter.acall("test prompt")
+        assert response1 == response2
+        assert cache.size() == 1
+
+
 # ─────────────────────────── AgentFactory ─────────────────────────
 
 class TestAgentFactory:
     def test_register_and_create(self, factory, mock_config):
-        # factory — из фикстуры, уже с registry+validator
         factory.register("mock", MockAgent)
         agent = factory.create_agent("mock", mock_config, skip_validation=True)
         assert isinstance(agent, MockAgent)
@@ -113,13 +203,25 @@ class TestAgentFactory:
         with pytest.raises(ValueError, match="Неизвестный тип агента"):
             factory.create_agent("nonexistent", mock_config)
 
+    def test_create_unbound_raises(self, factory, mock_config):
+        """Агент есть в registry (метаданные), но класс не привязан."""
+        # event_generation загружен из дефолтов, но без класса
+        with pytest.raises(ValueError, match="класс не привязан"):
+            factory.create_agent("event_generation", mock_config)
+
     def test_register_non_agent_raises(self, factory):
         with pytest.raises(TypeError, match="должен быть наследником BaseAgent"):
             factory.register("bad", dict)
 
-    def test_list_agents(self, factory):
+    def test_list_agents_only_bound(self, factory):
+        """list_agents возвращает только агентов с привязанным классом."""
+        assert "event_generation" not in factory.list_agents()
         factory.register("mock", MockAgent)
         assert "mock" in factory.list_agents()
+
+    def test_list_all_agents(self, factory):
+        """list_all_agents включает агентов без класса."""
+        assert "event_generation" in factory.list_all_agents()
 
     def test_unregister(self, factory):
         factory.register("mock", MockAgent)
@@ -154,6 +256,7 @@ class TestAgentRegistry:
         meta = registry.get("event_generation")
         assert meta is not None
         assert meta.name == "Event Generation Agent"
+        assert meta.agent_class is None  # дефолты без класса
 
     def test_get_nonexistent(self):
         registry = AgentRegistry()
@@ -163,6 +266,7 @@ class TestAgentRegistry:
         registry = AgentRegistry()
         info = registry.format_info("event_generation")
         assert "Event Generation Agent" in info
+        assert "<не привязан>" in info
 
     def test_format_info_not_found(self):
         registry = AgentRegistry()
@@ -176,9 +280,98 @@ class TestAgentRegistry:
             inputs=["a"], outputs=["b"],
         ))
         assert registry.get("custom") is not None
+        assert registry.get("custom").agent_class is None
+
+    def test_bind_class(self):
+        registry = AgentRegistry(load_defaults=False)
+        registry.register("test", AgentMetadata(
+            name="Test", description="test", version="0.1",
+            inputs=[], outputs=[],
+        ))
+        registry.bind_class("test", MockAgent)
+        assert registry.get_class("test") is MockAgent
+
+    def test_bind_class_auto_metadata(self):
+        """bind_class без предварительного register — автоматические метаданные."""
+        registry = AgentRegistry(load_defaults=False)
+        registry.bind_class("auto", MockAgent)
+        meta = registry.get("auto")
+        assert meta is not None
+        assert meta.agent_class is MockAgent
+        assert meta.version == "0.0.0"  # auto-generated
+
+    def test_bind_class_preserves_metadata(self):
+        """bind_class сохраняет существующие метаданные."""
+        registry = AgentRegistry(load_defaults=False)
+        registry.register("rich", AgentMetadata(
+            name="Rich Agent", description="detailed", version="1.0.0",
+            inputs=["a", "b"], outputs=["c"],
+        ))
+        registry.bind_class("rich", MockAgent)
+        meta = registry.get("rich")
+        assert meta.name == "Rich Agent"
+        assert meta.version == "1.0.0"
+        assert meta.agent_class is MockAgent
+
+    def test_list_bound_agents(self):
+        registry = AgentRegistry(load_defaults=False)
+        registry.register("meta_only", AgentMetadata(
+            name="M", description="", version="0.1", inputs=[], outputs=[],
+        ))
+        registry.bind_class("with_class", MockAgent)
+        assert "with_class" in registry.list_bound_agents()
+        assert "meta_only" not in registry.list_bound_agents()
+
+    def test_bind_non_agent_raises(self):
+        registry = AgentRegistry(load_defaults=False)
+        with pytest.raises(TypeError, match="должен быть наследником BaseAgent"):
+            registry.bind_class("bad", dict)
 
 
-# ─────────────────────────── LLMAdapter ───────────────────────────
+# ─────────────────────────── Engine Validation ────────────────────
+
+class TestEngineValidation:
+    def test_claude_engine_requires_base_url(self):
+        config = LLMConfig(provider=LLMProvider.CLAUDE, model="claude-3-opus")
+        api_config = ApiConfig(api_key="test-key", base_url="")
+
+        with pytest.raises(LLMEngineError, match="прокси"):
+            ClaudeEngine(config, api_config)
+
+    def test_gemini_engine_requires_base_url(self):
+        config = LLMConfig(provider=LLMProvider.GEMINI, model="gemini-pro")
+        api_config = ApiConfig(api_key="test-key", base_url="")
+
+        with pytest.raises(LLMEngineError, match="прокси"):
+            GeminiEngine(config, api_config)
+
+    def test_claude_engine_accepts_base_url(self):
+        """С base_url — не падает (openai пакет нужен)."""
+        config = LLMConfig(provider=LLMProvider.CLAUDE, model="claude-3-opus")
+        api_config = ApiConfig(api_key="test-key", base_url="http://localhost:4000/v1")
+
+        try:
+            engine = ClaudeEngine(config, api_config)
+            assert engine is not None
+        except LLMEngineError as e:
+            if "openai" in str(e).lower():
+                pytest.skip("openai пакет не установлен")
+            raise
+
+    def test_gemini_engine_accepts_base_url(self):
+        config = LLMConfig(provider=LLMProvider.GEMINI, model="gemini-pro")
+        api_config = ApiConfig(api_key="test-key", base_url="http://localhost:4000/v1")
+
+        try:
+            engine = GeminiEngine(config, api_config)
+            assert engine is not None
+        except LLMEngineError as e:
+            if "openai" in str(e).lower():
+                pytest.skip("openai пакет не установлен")
+            raise
+
+
+# ─────────────────────────── LLMAdapter (sync) ───────────────────
 
 class TestLLMAdapter:
     def test_mock_call(self):
@@ -196,11 +389,9 @@ class TestLLMAdapter:
         cache = InMemoryCache()
         adapter = LLMAdapter(config, cache=cache)
 
-        # Первый вызов — cache miss, сохраняет в кэш
         response1 = adapter.call("test prompt")
         assert cache.size() == 1
 
-        # Второй вызов — cache hit
         response2 = adapter.call("test prompt")
         assert response1 == response2
         assert cache.size() == 1
@@ -211,14 +402,12 @@ class TestLLMAdapter:
 
         assert adapter.get_tokens_used() == 0
         adapter.call("test")
-        # Mock не добавляет токены
         assert adapter.get_tokens_used() == 0
 
         adapter.reset_tokens()
         assert adapter.get_tokens_used() == 0
 
     def test_cache_key_includes_model_params(self):
-        """Разные параметры → разные ключи кэша."""
         config1 = LLMConfig(provider=LLMProvider.MOCK, model="gpt-4", temperature=0.7)
         config2 = LLMConfig(provider=LLMProvider.MOCK, model="gpt-3.5", temperature=0.7)
         config3 = LLMConfig(provider=LLMProvider.MOCK, model="gpt-4", temperature=0.3)
@@ -232,13 +421,11 @@ class TestLLMAdapter:
         key2 = adapter2._cache_key(prompt)
         key3 = adapter3._cache_key(prompt)
 
-        # Все ключи разные
-        assert key1 != key2, "Разные модели должны давать разные ключи"
-        assert key1 != key3, "Разная temperature должна давать разные ключи"
+        assert key1 != key2
+        assert key1 != key3
         assert key2 != key3
 
     def test_cache_key_same_params_same_key(self):
-        """Одинаковые параметры → одинаковый ключ."""
         config = LLMConfig(provider=LLMProvider.MOCK, model="gpt-4", temperature=0.7)
         adapter1 = LLMAdapter(config)
         adapter2 = LLMAdapter(config)
@@ -246,7 +433,6 @@ class TestLLMAdapter:
         assert adapter1._cache_key("test") == adapter2._cache_key("test")
 
     def test_different_configs_no_cache_collision(self):
-        """Разные конфиги с общим кэшем не пересекаются."""
         cache = InMemoryCache()
 
         config_a = LLMConfig(provider=LLMProvider.MOCK, model="gpt-4")
@@ -255,10 +441,9 @@ class TestLLMAdapter:
         adapter_a = LLMAdapter(config_a, cache=cache)
         adapter_b = LLMAdapter(config_b, cache=cache)
 
-        response_a = adapter_a.call("test prompt")
-        response_b = adapter_b.call("test prompt")
+        adapter_a.call("test prompt")
+        adapter_b.call("test prompt")
 
-        # Оба ответа в кэше как отдельные записи
         assert cache.size() == 2
 
 
@@ -278,7 +463,7 @@ class TestInMemoryCache:
         cache = InMemoryCache(max_size=2)
         cache.set("k1", "v1")
         cache.set("k2", "v2")
-        cache.set("k3", "v3")  # должен вытеснить k1
+        cache.set("k3", "v3")
         assert cache.size() == 2
 
     def test_clear(self):

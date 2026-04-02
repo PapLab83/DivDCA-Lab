@@ -36,26 +36,17 @@ class Container:
     """
 
     def __init__(
-        self,
-        config: AgentConfig,
-        *,
-        registry: Optional[AgentRegistry] = None,
-        cache: Optional[CacheProtocol] = None,
+            self,
+            config: AgentConfig,
+            *,
+            registry: Optional[AgentRegistry] = None,
+            cache: Optional[CacheProtocol] = None,
     ) -> None:
-        """
-        Args:
-            config: конфигурация агента (LLM + API + режим)
-            registry: реестр метаданных (если None — создаётся с дефолтами)
-            cache: кэш для LLM-ответов (если None — создаётся InMemoryCache
-                   при config.cache_enabled, иначе без кэша)
-        """
         self._config = config
 
-        # ── Registry → Validator ──
+        # ── Registry → Validator → Factory ──
         self._registry = registry or AgentRegistry()
         self._validator = AgentValidator(self._registry)
-
-        # ── Factory ──
         self._factory = AgentFactory(
             registry=self._registry,
             validator=self._validator,
@@ -77,11 +68,13 @@ class Container:
         )
 
         logger.info(
-            "Container создан: provider=%s, model=%s, cache=%s, agents=%d",
+            "Container создан: provider=%s, model=%s, cache=%s, "
+            "agents_total=%d, agents_bound=%d",
             config.llm_config.provider,
             config.llm_config.model,
             type(self._cache).__name__ if self._cache else "disabled",
             len(self._registry.list_agents()),
+            len(self._registry.list_bound_agents()),
         )
 
     # ── Свойства (read-only) ──

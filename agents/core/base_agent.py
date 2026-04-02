@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import time
+import asyncio
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
@@ -262,10 +263,11 @@ class BaseAgent(ABC):
     async def _execute_internal_async(self, context: AgentContext) -> AgentResult:
         """
         Асинхронная внутренняя реализация.
-        По умолчанию делегирует в синхронный метод.
+        По умолчанию запускает синхронный метод в thread pool,
+        чтобы не блокировать event loop.
         Переопределите для настоящей async-логики.
         """
-        return self._execute_internal(context)
+        return await asyncio.to_thread(self._execute_internal, context)
 
     # ── hooks (переопределяемые) ──────────────────────────────────
 

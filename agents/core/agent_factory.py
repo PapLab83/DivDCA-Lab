@@ -1,11 +1,9 @@
 """
 Фабрика для создания агентов.
-Принимает registry и validator через конструктор (DI).
-Не является singleton — lifecycle управляется Container'ом.
+Делегирует хранение классов в Registry (единый источник правды).
 """
 import logging
-import threading
-from typing import Dict, List, Optional, Type
+from typing import List, Optional, Type
 
 from agents.core.base_agent import AgentConfig, BaseAgent, LLMAdapterProtocol
 
@@ -15,69 +13,49 @@ logger = logging.getLogger(__name__)
 
 class AgentFactory:
     """
-    Фабрика для создания агентов (потокобезопасная).
+    Фабрика для создания агентов.
 
-    Получает registry и validator через конструктор.
-    При создании агента автоматически проверяет совместимость
-    с конфигурацией (если validator передан).
+    Не хранит классы самостоятельно — делегирует в Registry.
+    Registry = единый источник правды для метаданных И классов.
     """
 
     def __init__(
         self,
-        registry: Optional["AgentRegistry"] = None,
+        registry: "AgentRegistry",
         validator: Optional["AgentValidator"] = None,
     ) -> None:
         """
         Args:
-            registry: реестр метаданных агентов (опционально)
+            registry: реестр метаданных и классов агентов (обязателен)
             validator: валидатор совместимости (опционально;
-                       если registry передан без validator —
-                       validator создаётся автоматически)
+                       если не передан — создаётся автоматически)
         """
-        self._agents: Dict[str, Type[BaseAgent]] = {}
-        self._lock = threading.Lock()
         self._registry = registry
         self._validator = validator
 
-        # Автосоздание validator если передан только registry
-        if self._registry is not None and self._validator is None:
+        if self._validator is None:
             from agents.core.agent_validator import AgentValidator
             self._validator = AgentValidator(self._registry)
 
-        if self._registry is not None:
-            logger.info(
-                "Factory создана с registry (%d агентов)",
-                len(self._registry.list_agents()),
-            )
-        else:
-            logger.debug("Factory создана без registry")
+        logger.info(
+            "Factory создана: %d агентов в registry, %d с привязанным классом",
+            len(self._registry.list_agents()),
+            len(self._registry.list_bound_agents()),
+        )
 
-    # ── регистрация ───────────────────────────────────────────────
+    # ── регистрация (делегирует в registry) ───────────────────────
 
     def register(self, agent_type: str, agent_class: Type[BaseAgent]) -> None:
         """
-        Регистрирует новый тип агента.
+        Регистрирует класс агента в registry.
+
+        Если метаданные уже есть — привязывает класс.
+        Если нет — создаёт минимальные метаданные автоматически.
 
         Raises:
             TypeError: если agent_class не наследник BaseAgent
         """
-        if not issubclass(agent_class, BaseAgent):
-            raise TypeError(
-                f"{agent_class.__name__} должен быть наследником BaseAgent"
-            )
-
-        with self._lock:
-            if agent_type in self._agents:
-                existing = self._agents[agent_type].__name__
-                logger.warning(
-                    "Тип '%s' уже зарегистрирован (%s), перезаписывается на %s",
-                    agent_type, existing, agent_class.__name__,
-                )
-            self._agents[agent_type] = agent_class
-            logger.debug(
-                "Зарегистрирован: %s -> %s",
-                agent_type, agent_class.__name__,
-            )
+        self._registry.bind_class(agent_type, agent_class)
 
     def register_agent(self, agent_type: str):
         """Декоратор для автоматической регистрации агента."""
@@ -88,8 +66,7 @@ class AgentFactory:
 
     def unregister(self, agent_type: str) -> None:
         """Удаляет агента из реестра."""
-        with self._lock:
-            self._agents.pop(agent_type, None)
+        self._registry.unregister(agent_type)
 
     # ── создание ──────────────────────────────────────────────────
 
@@ -104,9 +81,6 @@ class AgentFactory:
         """
         Создаёт агента нужного типа.
 
-        Если подключён validator — проверяет совместимость
-        агента с конфигурацией перед созданием.
-
         Args:
             agent_type: строковый идентификатор
             config: конфигурация агента
@@ -114,15 +88,22 @@ class AgentFactory:
             skip_validation: пропустить валидацию
 
         Raises:
-            ValueError: тип не зарегистрирован или валидация не пройдена
+            ValueError: тип не зарегистрирован, класс не привязан,
+                        или валидация не пройдена
         """
-        with self._lock:
-            if agent_type not in self._agents:
+        # Получаем класс из registry
+        agent_class = self._registry.get_class(agent_type)
+        if agent_class is None:
+            available = self._registry.list_bound_agents()
+            if agent_type not in self._registry:
                 raise ValueError(
-                    f"Неизвестный тип агента: {agent_type}. "
-                    f"Доступные: {list(self._agents.keys())}"
+                    f"Неизвестный тип агента: '{agent_type}'. "
+                    f"Доступные (с классом): {available}"
                 )
-            agent_class = self._agents[agent_type]
+            raise ValueError(
+                f"Агент '{agent_type}' зарегистрирован в registry, "
+                f"но класс не привязан. Вызовите factory.register('{agent_type}', MyAgentClass)"
+            )
 
         # Валидация (если validator подключён)
         if not skip_validation and self._validator is not None:
@@ -141,12 +122,13 @@ class AgentFactory:
     # ── информация ────────────────────────────────────────────────
 
     def list_agents(self) -> List[str]:
-        """Список зарегистрированных типов агентов."""
-        with self._lock:
-            return list(self._agents.keys())
+        """Список агентов с привязанным классом (готовых к созданию)."""
+        return self._registry.list_bound_agents()
+
+    def list_all_agents(self) -> List[str]:
+        """Список всех агентов в registry (включая без класса)."""
+        return self._registry.list_agents()
 
     def get_agent_info(self, agent_type: str) -> Optional[str]:
-        """Описание агента из registry (если подключён)."""
-        if self._registry is None:
-            return None
+        """Описание агента из registry."""
         return self._registry.format_info(agent_type)
