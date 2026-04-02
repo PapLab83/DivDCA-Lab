@@ -4,6 +4,7 @@
 """
 import logging
 from dataclasses import dataclass
+from typing import List, Tuple
 
 from agents.core.base_agent import AgentConfig
 from agents.core.agent_registry import AgentRegistry, AgentMetadata
@@ -22,7 +23,7 @@ class ValidationError:
 class ValidationResult:
     """Результат валидации."""
     is_valid: bool
-    errors: tuple[ValidationError, ...] = ()
+    errors: Tuple[ValidationError, ...] = ()                    # ← CHANGED
 
     @classmethod
     def ok(cls) -> "ValidationResult":
@@ -94,7 +95,7 @@ class AgentValidator:
             agent_type: str,
             metadata: AgentMetadata,
             config: AgentConfig,
-    ) -> list[ValidationError]:
+    ) -> List[ValidationError]:                                  # ← CHANGED
         """
         Собирает список ошибок валидации.
 
@@ -103,7 +104,7 @@ class AgentValidator:
             []    — config error (no providers allowed)
             [..]  — whitelist
         """
-        errors: list[ValidationError] = []
+        errors: List[ValidationError] = []                       # ← CHANGED
         errors.extend(self._check_provider(agent_type, metadata, config))
         return errors
 
@@ -112,7 +113,7 @@ class AgentValidator:
             agent_type: str,
             metadata: AgentMetadata,
             config: AgentConfig,
-    ) -> list[ValidationError]:
+    ) -> List[ValidationError]:                                  # ← CHANGED
         """Проверка совместимости провайдера."""
         if metadata.supported_providers is None:
             return []
@@ -154,7 +155,6 @@ class AgentValidator:
         StrEnum — уже str, пройдёт isinstance(raw_provider, str).
         """
         if isinstance(raw_provider, str):
-            # StrEnum наследует str → попадает сюда
             return raw_provider
         raise TypeError(
             f"Expected str or StrEnum provider, got {type(raw_provider).__name__}: {raw_provider!r}"

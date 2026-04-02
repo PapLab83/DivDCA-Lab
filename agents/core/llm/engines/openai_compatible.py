@@ -3,7 +3,7 @@
 """
 
 import logging
-from typing import AsyncIterator, Iterator
+from typing import AsyncIterator, Iterator, Type
 
 try:
     import openai
@@ -176,7 +176,7 @@ class OpenAICompatibleEngine(BaseLLMEngine):
         if not HAS_OPENAI:
             return LLMEngineError(str(exc))
 
-        mapping: dict[type, type] = {
+        mapping: dict[Type, Type] = {
             openai.AuthenticationError: LLMAuthenticationError,
             openai.RateLimitError: LLMRateLimitError,
             openai.BadRequestError: LLMInvalidRequestError,
