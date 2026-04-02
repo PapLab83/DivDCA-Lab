@@ -14,6 +14,7 @@ from agents.core.base_agent import (
     LLMConfig,
     LLMProvider,
 )
+from agents.core.container import Container
 
 
 logger = logging.getLogger(__name__)
@@ -117,3 +118,23 @@ def try_load_yaml_config(path: str = "config.yaml") -> Optional[dict]:
     except Exception as e:
         logger.error("Ошибка чтения YAML конфига: %s", e)
         return None
+
+
+def build_container(
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    cache_enabled: bool = True,
+) -> Container:
+    """
+    Собирает полный DI-контейнер из переменных окружения.
+
+    Это основная точка входа для создания рабочего окружения:
+        container = build_container(provider="openai")
+        agent = container.factory.create_agent(...)
+    """
+    config = load_agent_config(
+        provider=provider,
+        model=model,
+        cache_enabled=cache_enabled,
+    )
+    return Container(config)

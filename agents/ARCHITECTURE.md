@@ -123,7 +123,7 @@ Conservative (default)          Aggressive (advanced user)
 agents/
 ├── core/                              # ── Ядро (framework) ──
 │   ├── base_agent.py                  # BaseAgent, Protocol'ы, Config, Result
-│   ├── agent_factory.py               # Фабрика создания агентов (singleton)
+│   ├── agent_factory.py               # Фабрика создания агентов
 │   ├── agent_registry.py              # Реестр метаданных (inputs/outputs/version)
 │   ├── agent_validator.py             # Валидация совместимости агент ↔ конфиг
 │   ├── prompt_manager.py              # [TODO] Шаблонизация и версионирование промптов
@@ -291,7 +291,7 @@ factory.create_agent(type, config)    registry.get(type) → AgentMetadata
 | Компонент                             | Статус | Приоритет |
 | ------------------------------------- | :----: | :-------: |
 | BaseAgent + execute (sync/async)      |    ✅   |     —     |
-| AgentFactory (singleton, thread-safe) |    ✅   |     —     |
+| AgentFactory (thread-safe, создаётся через Container) |    ✅   |     —     |
 | AgentRegistry (metadata, YAML)        |    ✅   |     —     |
 | AgentValidator                        |    ✅   |     —     |
 | LLMAdapter + retry + cache            |    ✅   |     —     |

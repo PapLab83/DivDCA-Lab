@@ -103,44 +103,37 @@ class TestBaseAgent:
 # ─────────────────────────── AgentFactory ─────────────────────────
 
 class TestAgentFactory:
-    def test_register_and_create(self, mock_config):
-        factory = AgentFactory()
+    def test_register_and_create(self, factory, mock_config):
+        # factory — из фикстуры, уже с registry+validator
         factory.register("mock", MockAgent)
-
-        agent = factory.create_agent("mock", mock_config)
+        agent = factory.create_agent("mock", mock_config, skip_validation=True)
         assert isinstance(agent, MockAgent)
 
-    def test_create_unknown_raises(self, mock_config):
-        factory = AgentFactory()
+    def test_create_unknown_raises(self, factory, mock_config):
         with pytest.raises(ValueError, match="Неизвестный тип агента"):
             factory.create_agent("nonexistent", mock_config)
 
-    def test_register_non_agent_raises(self):
-        factory = AgentFactory()
+    def test_register_non_agent_raises(self, factory):
         with pytest.raises(TypeError, match="должен быть наследником BaseAgent"):
-            factory.register("bad", dict)  # type: ignore
+            factory.register("bad", dict)
 
-    def test_list_agents(self):
-        factory = AgentFactory()
+    def test_list_agents(self, factory):
         factory.register("mock", MockAgent)
         assert "mock" in factory.list_agents()
 
-    def test_unregister(self):
-        factory = AgentFactory()
+    def test_unregister(self, factory):
         factory.register("mock", MockAgent)
         factory.unregister("mock")
         assert "mock" not in factory.list_agents()
 
-    def test_decorator_registration(self, mock_config):
-        factory = AgentFactory()
-
+    def test_decorator_registration(self, factory, mock_config):
         @factory.register_agent("decorated")
         class DecoratedAgent(BaseAgent):
             def _execute_internal(self, context):
                 return AgentResult(success=True)
 
         assert "decorated" in factory.list_agents()
-        agent = factory.create_agent("decorated", mock_config)
+        agent = factory.create_agent("decorated", mock_config, skip_validation=True)
         assert isinstance(agent, DecoratedAgent)
 
 

@@ -73,9 +73,14 @@ config = load_agent_config(provider="mock")
 adapter = LLMAdapter(config.llm_config, config.api_config)
 
 # Создание агента
-factory = AgentFactory()
-factory.register("event_generation", EventGenerationAgent)
-agent = factory.create_agent("event_generation", config, llm_adapter=adapter)
+from agents.config import build_container
+
+container = build_container(provider="mock")
+container.factory.register("event_generation", EventGenerationAgent)
+agent = container.factory.create_agent(
+    "event_generation", container.config,
+    llm_adapter=container.llm_adapter,
+)
 
 # Выполнение
 context = AgentContext(agent_id="run-001", task="event_generation")
