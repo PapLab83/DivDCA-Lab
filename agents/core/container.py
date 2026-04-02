@@ -14,7 +14,8 @@ from agents.core.agent_validator import AgentValidator
 from agents.core.agent_factory import AgentFactory
 from agents.core.llm.adapter import LLMAdapter
 from agents.core.skills.cache import InMemoryCache
-
+from agents.core.prompt_manager import PromptManager
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,12 @@ class Container:
             cache=self._cache,
         )
 
+        # ── PromptManager ──
+        self._prompt_manager = PromptManager()
+        prompts_path = Path(__file__).parent.parent / "prompts"
+        if prompts_path.is_dir():
+            self._prompt_manager = PromptManager.from_yaml(str(prompts_path))
+
         logger.info(
             "Container создан: provider=%s, model=%s, cache=%s, "
             "agents_total=%d, agents_bound=%d",
@@ -78,6 +85,9 @@ class Container:
         )
 
     # ── Свойства (read-only) ──
+    @property
+    def prompt_manager(self) -> PromptManager:
+        return self._prompt_manager
 
     @property
     def config(self) -> AgentConfig:
