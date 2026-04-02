@@ -69,10 +69,11 @@ class Container:
         )
 
         # ── PromptManager ──
-        self._prompt_manager = PromptManager()
         prompts_path = Path(__file__).parent.parent / "prompts"
         if prompts_path.is_dir():
             self._prompt_manager = PromptManager.from_yaml(str(prompts_path))
+        else:
+            self._prompt_manager = PromptManager()
 
         logger.info(
             "Container создан: provider=%s, model=%s, cache=%s, "

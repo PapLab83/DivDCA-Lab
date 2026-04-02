@@ -58,7 +58,7 @@
      (+) Базовый движок модели (core/llm/engines/base_engine.py)
      (+) Реализация OpenAI (openai_engine.py)
      (+) Менеджер сборки промпта (core/prompt_manager.py)
-   5) (+) Другие агенты: движок
+   5) (-) Запустить pytest agents/tests/test_core.py -v
    5) (-) Engines
    6) (-) Агент получения событий (agent.py)
    5) (-) Оркестратор 
