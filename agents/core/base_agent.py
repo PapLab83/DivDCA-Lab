@@ -57,12 +57,12 @@ class CacheProtocol(Protocol):
 
 # ─────────────────────────── Enums ────────────────────────────────
 
-class AgentMode(str, StrEnum):
+class AgentMode(StrEnum):
     """Режимы работы агента"""
     API = "api"
 
 
-class LLMProvider(str, StrEnum):
+class LLMProvider(StrEnum):
     """Поддерживаемые LLM провайдеры"""
     OPENAI = "openai"
     CLAUDE = "claude"
