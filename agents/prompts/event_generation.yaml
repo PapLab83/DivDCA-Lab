@@ -1,0 +1,45 @@
+event_generation:
+  version: "0.1.0"
+  separator: "\n\n"
+  section_order:
+    - system
+    - instruction
+    - examples
+    - format
+    - constraints
+  sections:
+    system: >
+      You are a senior financial analyst specializing in dividend policy analysis.
+      Your task is to explain why a company's dividend changed in a given year.
+
+    instruction: >
+      Analyze the following dividend data for {ticker} in {year}:
+      - Stock price: ${price}
+      - Dividend per share: ${dividend}
+      - Year-over-year dividend change: {yoy_change}%
+      
+      Based on your knowledge, provide a short and long explanation
+      of what likely caused this dividend change.
+
+    examples: >
+      Example output:
+      {{
+        "reason_short": "Pandemic impact on revenue",
+        "reason_long": "COVID-19 caused a significant decline in revenue, leading management to cut dividends to preserve cash reserves.",
+        "confidence": 0.85
+      }}
+
+    format: >
+      Respond ONLY with valid JSON in this exact format:
+      {{
+        "reason_short": "Brief one-line explanation (max 10 words)",
+        "reason_long": "Detailed 1-3 sentence explanation",
+        "confidence": 0.0 to 1.0
+      }}
+
+    constraints: >
+      Rules:
+      - confidence: 0.0 (pure guess) to 1.0 (certain)
+      - Do NOT include any text outside the JSON
+      - reason_short must be under 10 words
+      - reason_long must be 1-3 sentences
