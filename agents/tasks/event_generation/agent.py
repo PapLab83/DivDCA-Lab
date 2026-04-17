@@ -2,6 +2,7 @@
 Агент генерации событий — объясняет причины изменения дивидендов.
 """
 import logging
+from typing import Optional
 
 from agents.core.base_agent import (
     AgentContext,
@@ -25,10 +26,10 @@ class EventGenerationAgent(BaseAgent):
     """
 
     def __init__(
-        self,
-        config: AgentConfig,
-        llm_adapter: LLMAdapterProtocol = None,
-        prompt_manager: PromptManagerProtocol = None,
+            self,
+            config: AgentConfig,
+            llm_adapter: Optional[LLMAdapterProtocol] = None,
+            prompt_manager: Optional[PromptManagerProtocol] = None,
     ):
         super().__init__(config, llm_adapter, prompt_manager)
 

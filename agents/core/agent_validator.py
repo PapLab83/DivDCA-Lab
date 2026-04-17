@@ -4,13 +4,14 @@
 """
 import logging
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from agents.core.base_agent import AgentConfig
 from agents.core.agent_registry import AgentRegistry, AgentMetadata
 
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class ValidationError:
@@ -23,7 +24,7 @@ class ValidationError:
 class ValidationResult:
     """Результат валидации."""
     is_valid: bool
-    errors: Tuple[ValidationError, ...] = ()                    # ← CHANGED
+    errors: Tuple[ValidationError, ...] = ()
 
     @classmethod
     def ok(cls) -> "ValidationResult":
@@ -95,16 +96,9 @@ class AgentValidator:
             agent_type: str,
             metadata: AgentMetadata,
             config: AgentConfig,
-    ) -> List[ValidationError]:                                  # ← CHANGED
-        """
-        Собирает список ошибок валидации.
-
-        supported_providers contract:
-            None  — no restrictions
-            []    — config error (no providers allowed)
-            [..]  — whitelist
-        """
-        errors: List[ValidationError] = []                       # ← CHANGED
+    ) -> List[ValidationError]:
+        """Собирает список ошибок валидации."""
+        errors: List[ValidationError] = []
         errors.extend(self._check_provider(agent_type, metadata, config))
         return errors
 
@@ -113,7 +107,7 @@ class AgentValidator:
             agent_type: str,
             metadata: AgentMetadata,
             config: AgentConfig,
-    ) -> List[ValidationError]:                                  # ← CHANGED
+    ) -> List[ValidationError]:
         """Проверка совместимости провайдера."""
         if metadata.supported_providers is None:
             return []
@@ -135,13 +129,25 @@ class AgentValidator:
                 )
             ]
 
-        provider = self._normalize_provider(raw_provider)
-        if provider not in metadata.supported_providers:
+        # S5: нормализация через ValidationError, не TypeError
+        normalized = self._normalize_provider(raw_provider)
+        if normalized is None:
+            return [
+                ValidationError(
+                    code="INVALID_PROVIDER_TYPE",
+                    message=(
+                        f"Agent '{agent_type}': expected str or StrEnum provider, "
+                        f"got {type(raw_provider).__name__}: {raw_provider!r}"
+                    ),
+                )
+            ]
+
+        if normalized not in metadata.supported_providers:
             return [
                 ValidationError(
                     code="PROVIDER_UNSUPPORTED",
                     message=(
-                        f"Agent '{agent_type}' does not support provider '{provider}'. "
+                        f"Agent '{agent_type}' does not support provider '{normalized}'. "
                         f"Allowed: {metadata.supported_providers}"
                     ),
                 )
@@ -149,13 +155,13 @@ class AgentValidator:
         return []
 
     @staticmethod
-    def _normalize_provider(raw_provider: object) -> str:
+    def _normalize_provider(raw_provider: object) -> Optional[str]:
         """
         Приводит провайдера к строке.
-        StrEnum — уже str, пройдёт isinstance(raw_provider, str).
+
+        Возвращает строку если тип корректный,
+        None если тип неожиданный (вместо TypeError — контракт не нарушается).
         """
         if isinstance(raw_provider, str):
             return raw_provider
-        raise TypeError(
-            f"Expected str or StrEnum provider, got {type(raw_provider).__name__}: {raw_provider!r}"
-        )
+        return None

@@ -71,6 +71,13 @@ class Container:
         if prompts_path.is_dir():
             self._prompt_manager: PromptManager = PromptManager.from_yaml(str(prompts_path))
         else:
+            # S3: явное предупреждение вместо молчаливого создания пустого менеджера
+            logger.warning(
+                "Директория промптов не найдена: %s. "
+                "PromptManager создан пустым — агенты упадут при вызове get_prompt(). "
+                "Зарегистрируйте промпты вручную через prompt_manager.register().",
+                prompts_path,
+            )
             self._prompt_manager = PromptManager()
 
         # ── Registry → Validator → Factory (с defaults) ──
