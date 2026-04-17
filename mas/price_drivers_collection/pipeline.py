@@ -27,6 +27,19 @@ def process_ticker(
     Returns:
         Список результатов по каждому году
     """
+    if not records:
+        return []
+
+    # Создаём агента один раз — он stateless
+    agent = container.factory.create_agent(
+        agent_type="event_generation",
+        config=container.config,
+        llm_adapter=container.llm_adapter,
+        skip_validation=True,
+    )
+    # TODO: перенести в Factory.create_agent (auto-inject из Container)
+    agent.prompt_manager = container.prompt_manager
+
     results = []
 
     for record in records:
@@ -44,15 +57,6 @@ def process_ticker(
                 "yoy_change": record["yoy_change"],
             },
         )
-
-        agent = container.factory.create_agent(
-            agent_type="event_generation",
-            config=container.config,
-            llm_adapter=container.llm_adapter,
-            skip_validation=True,
-        )
-        # Передаём prompt_manager агенту
-        agent.prompt_manager = container.prompt_manager
 
         result: AgentResult = agent.execute(context)
 
