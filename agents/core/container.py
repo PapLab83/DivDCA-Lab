@@ -6,16 +6,21 @@ DI-контейнер — единая точка сборки всех зави
 несколько экземпляров (тесты, multi-tenant, A/B).
 """
 import logging
-from typing import Optional
+from pathlib import Path
+from typing import Optional, cast
 
-from agents.core.base_agent import AgentConfig, CacheProtocol
+from agents.core.base_agent import (
+    AgentConfig,
+    CacheProtocol,
+    LLMAdapterProtocol,
+    PromptManagerProtocol,
+)
 from agents.core.agent_registry import AgentRegistry
 from agents.core.agent_validator import AgentValidator
 from agents.core.agent_factory import AgentFactory
 from agents.core.llm.adapter import LLMAdapter
 from agents.core.skills.cache import InMemoryCache
 from agents.core.prompt_manager import PromptManager
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +30,13 @@ class Container:
     Корневой DI-контейнер приложения.
 
     Собирает и связывает компоненты:
-        registry → validator → factory
-        config → cache → llm_adapter
+        config → cache → llm_adapter → prompt_manager
+        registry → validator → factory(с defaults)
 
     Использование:
         container = Container(config)
         agent = container.factory.create_agent("event_gen", config)
+        # agent уже имеет llm_adapter и prompt_manager
 
     Тесты:
         container = Container(mock_config)  # изолированный экземпляр
@@ -44,14 +50,6 @@ class Container:
             cache: Optional[CacheProtocol] = None,
     ) -> None:
         self._config = config
-
-        # ── Registry → Validator → Factory ──
-        self._registry = registry or AgentRegistry()
-        self._validator = AgentValidator(self._registry)
-        self._factory = AgentFactory(
-            registry=self._registry,
-            validator=self._validator,
-        )
 
         # ── Cache ──
         if cache is not None:
@@ -71,9 +69,19 @@ class Container:
         # ── PromptManager ──
         prompts_path = Path(__file__).parent.parent / "prompts"
         if prompts_path.is_dir():
-            self._prompt_manager = PromptManager.from_yaml(str(prompts_path))
+            self._prompt_manager: PromptManager = PromptManager.from_yaml(str(prompts_path))
         else:
             self._prompt_manager = PromptManager()
+
+        # ── Registry → Validator → Factory (с defaults) ──
+        self._registry = registry or AgentRegistry()
+        self._validator = AgentValidator(self._registry)
+        self._factory = AgentFactory(
+            registry=self._registry,
+            validator=self._validator,
+            default_llm_adapter=cast(LLMAdapterProtocol, self._llm_adapter),
+            default_prompt_manager=cast(PromptManagerProtocol, self._prompt_manager),
+        )
 
         logger.info(
             "Container создан: provider=%s, model=%s, cache=%s, "

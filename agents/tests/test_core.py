@@ -21,6 +21,7 @@ from agents.core.llm.adapter import LLMAdapter
 from agents.core.llm.engines.claude_engine import ClaudeEngine
 from agents.core.llm.engines.gemini_engine import GeminiEngine
 from agents.core.skills.cache import InMemoryCache
+from agents.core.agent_factory import AgentFactory
 
 from agents.tests.conftest import MockAgent, FailingAgent
 
@@ -205,13 +206,12 @@ class TestAgentFactory:
 
     def test_create_unbound_raises(self, factory, mock_config):
         """Агент есть в registry (метаданные), но класс не привязан."""
-        # event_generation загружен из дефолтов, но без класса
         with pytest.raises(ValueError, match="класс не привязан"):
             factory.create_agent("event_generation", mock_config)
 
     def test_register_non_agent_raises(self, factory):
         with pytest.raises(TypeError, match="должен быть наследником BaseAgent"):
-            factory.register("bad", dict)
+            factory.register("bad", dict)  # type: ignore[arg-type]
 
     def test_list_agents_only_bound(self, factory):
         """list_agents возвращает только агентов с привязанным классом."""
@@ -237,6 +237,64 @@ class TestAgentFactory:
         assert "decorated" in factory.list_agents()
         agent = factory.create_agent("decorated", mock_config, skip_validation=True)
         assert isinstance(agent, DecoratedAgent)
+
+    # ── Auto-inject через Container ──────────────────────────────
+
+    def test_create_agent_injects_default_llm_adapter(self, container, mock_config):
+        """Factory автоматически инжектит llm_adapter из Container."""
+        container.factory.register("mock", MockAgent)
+        agent = container.factory.create_agent("mock", mock_config, skip_validation=True)
+        assert agent.llm_adapter is not None
+        assert agent.llm_adapter is container.llm_adapter
+
+    def test_create_agent_injects_default_prompt_manager(self, container, mock_config):
+        """Factory автоматически инжектит prompt_manager из Container."""
+        container.factory.register("mock", MockAgent)
+        agent = container.factory.create_agent("mock", mock_config, skip_validation=True)
+        assert agent.prompt_manager is not None
+        assert agent.prompt_manager is container.prompt_manager
+
+    def test_explicit_llm_adapter_overrides_default(self, container, mock_config):
+        """Явно переданный llm_adapter имеет приоритет над default."""
+        container.factory.register("mock", MockAgent)
+
+        custom_adapter = LLMAdapter(
+            config=LLMConfig(provider=LLMProvider.MOCK),
+        )
+        agent = container.factory.create_agent(
+            "mock", mock_config,
+            llm_adapter=custom_adapter,
+            skip_validation=True,
+        )
+        assert agent.llm_adapter is custom_adapter
+        assert agent.llm_adapter is not container.llm_adapter
+
+    def test_explicit_prompt_manager_overrides_default(self, container, mock_config):
+        """Явно переданный prompt_manager имеет приоритет над default."""
+        from agents.core.prompt_manager import PromptManager
+
+        container.factory.register("mock", MockAgent)
+
+        custom_pm = PromptManager()
+        agent = container.factory.create_agent(
+            "mock", mock_config,
+            prompt_manager=custom_pm,  # type: ignore[arg-type]
+            skip_validation=True,
+        )
+        assert agent.prompt_manager is custom_pm
+        assert agent.prompt_manager is not container.prompt_manager
+
+    def test_factory_without_defaults_creates_agent_without_adapters(self):
+        """Factory без defaults — агент создаётся с None адаптерами."""
+        registry = AgentRegistry(load_defaults=False)
+        factory = AgentFactory(registry=registry)
+        factory.register("mock", MockAgent)
+
+        config = AgentConfig(llm_config=LLMConfig(provider=LLMProvider.MOCK))
+        agent = factory.create_agent("mock", config, skip_validation=True)
+
+        assert agent.llm_adapter is None
+        assert agent.prompt_manager is None
 
 
 # ─────────────────────────── AgentRegistry ────────────────────────

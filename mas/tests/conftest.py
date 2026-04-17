@@ -102,6 +102,7 @@ def integration_container(mock_config) -> Container:
     """
     Полный integration-контейнер:
     реальный EventGenerationAgent + MockEngine + PromptManager.
+    Factory автоматически инжектит llm_adapter и prompt_manager.
     """
     container = Container(mock_config)
     container.factory.register("event_generation", EventGenerationAgent)

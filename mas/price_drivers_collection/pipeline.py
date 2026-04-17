@@ -30,15 +30,13 @@ def process_ticker(
     if not records:
         return []
 
-    # Создаём агента один раз — он stateless
+    # Агент создаётся один раз — он stateless.
+    # Factory автоматически инжектит llm_adapter и prompt_manager.
     agent = container.factory.create_agent(
         agent_type="event_generation",
         config=container.config,
-        llm_adapter=container.llm_adapter,
         skip_validation=True,
     )
-    # TODO: перенести в Factory.create_agent (auto-inject из Container)
-    agent.prompt_manager = container.prompt_manager
 
     results = []
 

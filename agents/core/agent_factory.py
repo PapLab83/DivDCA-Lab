@@ -1,11 +1,20 @@
 """
 Фабрика для создания агентов.
 Делегирует хранение классов в Registry (единый источник правды).
+Поддерживает default-зависимости (llm_adapter, prompt_manager),
+которые инжектируются автоматически при создании агента.
 """
 import logging
 from typing import List, Optional, Type
 
-from agents.core.base_agent import AgentConfig, BaseAgent, LLMAdapterProtocol
+from agents.core.base_agent import (
+    AgentConfig,
+    BaseAgent,
+    LLMAdapterProtocol,
+    PromptManagerProtocol,
+)
+from agents.core.agent_registry import AgentRegistry
+from agents.core.agent_validator import AgentValidator
 
 
 logger = logging.getLogger(__name__)
@@ -16,31 +25,38 @@ class AgentFactory:
     Фабрика для создания агентов.
 
     Не хранит классы самостоятельно — делегирует в Registry.
-    Registry = единый источник правды для метаданных И классов.
+    Хранит default-зависимости (llm_adapter, prompt_manager),
+    которые пробрасываются в агента если не переданы явно.
     """
 
     def __init__(
         self,
-        registry: "AgentRegistry",
-        validator: Optional["AgentValidator"] = None,
+        registry: AgentRegistry,
+        validator: Optional[AgentValidator] = None,
+        *,
+        default_llm_adapter: Optional[LLMAdapterProtocol] = None,
+        default_prompt_manager: Optional[PromptManagerProtocol] = None,
     ) -> None:
         """
         Args:
             registry: реестр метаданных и классов агентов (обязателен)
             validator: валидатор совместимости (опционально;
                        если не передан — создаётся автоматически)
+            default_llm_adapter: LLM адаптер по умолчанию
+            default_prompt_manager: менеджер промптов по умолчанию
         """
         self._registry = registry
-        self._validator = validator
-
-        if self._validator is None:
-            from agents.core.agent_validator import AgentValidator
-            self._validator = AgentValidator(self._registry)
+        self._validator = validator or AgentValidator(registry)
+        self._default_llm_adapter = default_llm_adapter
+        self._default_prompt_manager = default_prompt_manager
 
         logger.info(
-            "Factory создана: %d агентов в registry, %d с привязанным классом",
+            "Factory создана: %d агентов в registry, %d с привязанным классом, "
+            "llm_adapter=%s, prompt_manager=%s",
             len(self._registry.list_agents()),
             len(self._registry.list_bound_agents()),
+            type(self._default_llm_adapter).__name__ if self._default_llm_adapter else "None",
+            type(self._default_prompt_manager).__name__ if self._default_prompt_manager else "None",
         )
 
     # ── регистрация (делегирует в registry) ───────────────────────
@@ -75,16 +91,23 @@ class AgentFactory:
         agent_type: str,
         config: AgentConfig,
         llm_adapter: Optional[LLMAdapterProtocol] = None,
+        prompt_manager: Optional[PromptManagerProtocol] = None,
         *,
         skip_validation: bool = False,
     ) -> BaseAgent:
         """
         Создаёт агента нужного типа.
 
+        Зависимости разрешаются по приоритету:
+            1. Явно переданные аргументы (llm_adapter, prompt_manager)
+            2. Default-зависимости из Factory (установлены Container'ом)
+            3. None — агент создаётся без адаптера (для тестов)
+
         Args:
             agent_type: строковый идентификатор
             config: конфигурация агента
-            llm_adapter: LLM адаптер (опционально)
+            llm_adapter: LLM адаптер (опционально; fallback → default)
+            prompt_manager: менеджер промптов (опционально; fallback → default)
             skip_validation: пропустить валидацию
 
         Raises:
@@ -105,8 +128,8 @@ class AgentFactory:
                 f"но класс не привязан. Вызовите factory.register('{agent_type}', MyAgentClass)"
             )
 
-        # Валидация (если validator подключён)
-        if not skip_validation and self._validator is not None:
+        # Валидация
+        if not skip_validation:
             validation = self._validator.validate(agent_type, config)
             if not validation.is_valid:
                 errors_str = "; ".join(
@@ -117,7 +140,11 @@ class AgentFactory:
                 )
             logger.debug("Валидация агента '%s' пройдена", agent_type)
 
-        return agent_class(config, llm_adapter)
+        # Разрешение зависимостей: явные > defaults > None
+        resolved_llm = llm_adapter if llm_adapter is not None else self._default_llm_adapter
+        resolved_pm = prompt_manager if prompt_manager is not None else self._default_prompt_manager
+
+        return agent_class(config, resolved_llm, resolved_pm)
 
     # ── информация ────────────────────────────────────────────────
 
