@@ -7,6 +7,8 @@
     AgentLifecycle  — жизненный цикл (таймер, финализация, логирование)
     ErrorMapper     — маппинг исключений в AgentResult
 """
+from __future__ import annotations
+
 import asyncio
 import logging
 
@@ -14,10 +16,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Optional, Dict, Any, Protocol, Set, Tuple, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol, Set, Tuple, runtime_checkable
 
 from agents.core.llm.exceptions import LLMParseError
 
+if TYPE_CHECKING:
+    from agents.core.profiles.profile import UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -163,15 +167,20 @@ class BaseAgent(ABC):
     Абстрактный базовый класс для всех агентов.
 
     Использует композицию:
-        _lifecycle  → AgentLifecycle  (тайм��р, финализация, логирование)
-        _parser     → ResponseParser  (парсинг JSON, валидация полей)
-        _error_mapper → ErrorMapper   (маппинг исключений → AgentResult)
+        _lifecycle    → AgentLifecycle  (таймер, финализация, логирование)
+        _parser       → ResponseParser  (парсинг JSON, валидация полей)
+        _error_mapper → ErrorMapper     (маппинг исключений → AgentResult)
+
+    Опциональные зависимости:
+        profile → UserProfile  (профиль агрессивности пользователя).
+            Если передан — добавляется в metadata контекста при каждом execute().
+            Агент может читать profile из context.metadata["profile"].
 
     Наследники переопределяют:
         _execute_internal(context) → AgentResult   [обязательно]
+        required_fields() → Set[str]               [опционально]
         _setup(context)                             [опционально]
         _cleanup(context)                           [опционально]
-        required_fields() → Set[str]               [опционально]
     """
 
     def __init__(
@@ -179,13 +188,24 @@ class BaseAgent(ABC):
         config: AgentConfig,
         llm_adapter: Optional[LLMAdapterProtocol] = None,
         prompt_manager: Optional[PromptManagerProtocol] = None,
+        profile: Optional[UserProfile] = None,
     ):
+        """
+        Args:
+            config: конфигурация агента (провайдер, модель, кэш)
+            llm_adapter: адаптер LLM (инжектируется Container'ом)
+            prompt_manager: менеджер промптов (инжектируется Container'ом)
+            profile: профиль агрессивности пользователя (опционально).
+                Если передан — добавляется в metadata каждого AgentContext.
+        """
         self.config = config
         self.llm_adapter = llm_adapter
         self.prompt_manager = prompt_manager
+        self.profile = profile
 
-        # ── Композиционные компоненты ──
-        # Импорт здесь чтобы избежать циклических зависимостей на уровне модуля
+        # ── Композиционные компоненты ──���───────────────────────────
+        # Импорт внутри __init__ исключает циклические зависимости на уровне модуля:
+        # base_agent ← agent_lifecycle/response_parser/error_mapper ← base_agent
         from agents.core.agent_lifecycle import AgentLifecycle
         from agents.core.response_parser import ResponseParser
         from agents.core.error_mapper import ErrorMapper
@@ -209,7 +229,7 @@ class BaseAgent(ABC):
         """
         Обязательные поля в ответе LLM.
 
-        Переопределите в наследнике для автоматической валидации:
+        Переопределите в наследнике для автоматической валидации через ResponseParser:
             def required_fields(self) -> Set[str]:
                 return {"reason_short", "reason_long", "confidence"}
 
@@ -217,10 +237,39 @@ class BaseAgent(ABC):
         """
         return set()
 
+    # ── Внутренний хелпер: обогащение контекста профилем ──────────
+
+    def _enrich_context_with_profile(self, context: AgentContext) -> AgentContext:
+        """
+        Добавляет UserProfile в metadata контекста если профиль задан
+        и ещё не присутствует в metadata.
+
+        Не мутирует исходный context — возвращает новый через dataclasses.replace.
+
+        Args:
+            context: исходный контекст
+
+        Returns:
+            Контекст с profile в metadata (или исходный если профиль не задан)
+        """
+        if self.profile is not None and "profile" not in context.metadata:
+            return replace(
+                context,
+                metadata={**context.metadata, "profile": self.profile},
+            )
+        return context
+
     # ── public: sync ──────────────────────────────────────────────
 
     def execute(self, context: AgentContext) -> AgentResult:
-        """Синхронное выполнение агента."""
+        """
+        Синхронное выполнение агента.
+
+        Если задан profile — добавляет его в context.metadata["profile"]
+        перед передачей в _execute_internal.
+        """
+        context = self._enrich_context_with_profile(context)
+
         start_time = self._lifecycle.start()
         result = AgentResult(success=False, error="Unexpected")
         try:
@@ -236,7 +285,14 @@ class BaseAgent(ABC):
     # ── public: async ─────────────────────────────────────────────
 
     async def execute_async(self, context: AgentContext) -> AgentResult:
-        """Асинхронное выполнение агента."""
+        """
+        Асинхронное выполнение агента.
+
+        Если задан profile — добавляет его в context.metadata["profile"]
+        перед передачей в _execute_internal_async.
+        """
+        context = self._enrich_context_with_profile(context)
+
         start_time = self._lifecycle.start()
         result = AgentResult(success=False, error="Unexpected")
         try:
@@ -275,7 +331,10 @@ class BaseAgent(ABC):
     # ── helpers ───────────────────────────────────────────────────
 
     def _get_prompt(self, context: AgentContext, **variables: Any) -> Tuple[str, str]:
-        """Получение промпта через PromptManager. Возвращает (prompt, version)."""
+        """
+        Получение промпта через PromptManager.
+        Возвращает (prompt, version).
+        """
         if not self.prompt_manager:
             raise RuntimeError("prompt_manager не инициализирован")
         return self.prompt_manager.get_prompt(task=context.task, **variables)
@@ -295,16 +354,16 @@ class BaseAgent(ABC):
         if isinstance(self.llm_adapter, AsyncLLMAdapterProtocol):
             return await self.llm_adapter.call(prompt)
         raise RuntimeError(
-            "llm_adapter не поддерживает async: нет acall() и не реализует AsyncLLMAdapterProtocol"
+            "llm_adapter не поддерживает async: "
+            "нет acall() и не реализует AsyncLLMAdapterProtocol"
         )
 
     def _parse_response(self, response: str) -> Dict[str, Any]:
         """
         Парсинг ответа от LLM через ResponseParser.
 
-        Делегирует в self._parser.
-        Оставлен для обратной совместимости с наследниками,
-        которые вызывают super()._parse_response().
+        Делегирует в self._parser.parse().
+        Оставлен для обратной совместимости с наследниками.
         """
         return self._parser.parse(response)
 
@@ -321,7 +380,7 @@ class BaseAgent(ABC):
         """
         Обработка ошибок.
 
-        Делегирует в self._error_mapper.
+        Делегирует в self._error_mapper.handle().
         Переопределите для кастомного маппинга конкретных исключений.
         """
         return self._error_mapper.handle(error, self.__class__.__name__)

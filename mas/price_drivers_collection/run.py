@@ -5,6 +5,7 @@ Env vars:
     LLM_PROVIDER:  mock | openai | claude | gemini (default: mock)
     OPENAI_API_KEY: ключ API (если provider != mock)
     DATA_SOURCE:   mock | ... (default: mock, в будущем: db, csv, api)
+    USER_PROFILE:  conservative | moderate | aggressive (default: conservative)
 """
 import json
 import logging
@@ -13,9 +14,10 @@ import sys
 from typing import Any, Dict, List
 
 from agents.config import build_container
+from agents.core.anonymizer import Anonymizer
+from agents.core.profiles import AggressivenessLevel, UserProfile
 from agents.tasks.event_generation.agent import EventGenerationAgent
 from mas.price_drivers_collection.orchestrator import run_collection
-
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,36 @@ def load_data(source: str) -> List[Dict[str, Any]]:
         f"Неизвестный DATA_SOURCE: '{source}'. "
         f"Доступные: mock"
     )
+
+
+def load_profile(level: str) -> UserProfile:
+    """
+    Создаёт UserProfile по имени уровня из ENV.
+
+    Args:
+        level: "conservative" | "moderate" | "aggressive"
+
+    Returns:
+        UserProfile соответствующего уровня.
+        Если уровень неизвестен — возвращает conservative с предупреждением.
+    """
+    profile_map: Dict[str, Any] = {
+        AggressivenessLevel.CONSERVATIVE: UserProfile.conservative,
+        AggressivenessLevel.MODERATE: UserProfile.moderate,
+        AggressivenessLevel.AGGRESSIVE: UserProfile.aggressive,
+    }
+
+    factory = profile_map.get(level)
+    if factory is None:
+        logger.warning(
+            "Неизвестный USER_PROFILE='%s'. "
+            "Доступные: %s. Используется 'conservative'.",
+            level,
+            list(profile_map.keys()),
+        )
+        return UserProfile.conservative()
+
+    return factory()
 
 
 def setup_logging() -> None:
@@ -76,10 +108,30 @@ def main() -> None:
     # 3. Загружаем данные
     tickers_data = load_data(data_source)
 
-    # 4. Запускаем оркестрацию
-    results = run_collection(container, tickers_data)
+    # 4. Anonymizer — анонимизируем тикеры перед передачей в LLM.
+    #    Один экземпляр на сессию: карта real ↔ anonymous сохраняется
+    #    между тикерами внутри одного запуска.
+    anonymizer = Anonymizer()
+    logger.info(
+        "Anonymizer создан: стратегия=%s",
+        anonymizer._strategy.__class__.__name__,
+    )
 
-    # 5. Выводим результаты
+    # 5. UserProfile — читаем из ENV, fallback → conservative.
+    #    Влияет на фильтрацию результатов по порогам confidence и dividend_yield.
+    profile_level = os.getenv("USER_PROFILE", AggressivenessLevel.CONSERVATIVE)
+    profile = load_profile(profile_level)
+    logger.info("UserProfile: %s", profile)
+
+    # 6. Запускаем оркестрацию
+    results = run_collection(
+        container,
+        tickers_data,
+        anonymizer=anonymizer,
+        profile=profile,
+    )
+
+    # 7. Выводим результаты
     logger.info("=" * 60)
     logger.info("РЕЗУЛЬТАТЫ")
     logger.info("=" * 60)
@@ -100,7 +152,10 @@ def main() -> None:
                 logger.info("  %d: ERROR — %s", r["year"], r["error"])
 
     logger.info("=" * 60)
-    logger.info("FULL JSON:\n%s", json.dumps(results, indent=2, ensure_ascii=False))
+    logger.info(
+        "FULL JSON:\n%s",
+        json.dumps(results, indent=2, ensure_ascii=False),
+    )
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ Pipeline для обработки одного тикера за период.
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from agents.core.base_agent import AgentContext, AgentResult
@@ -20,13 +20,8 @@ class PipelineConfig:
     Настройки pipeline обработки тикеров.
 
     Attributes:
-        call_timeout_seconds: максимальное время ожидания одного вызова агента.
-            По истечении вызов считается зависшим и возвращается ошибка.
-            Не прерывает сам LLM-вызов (thread продолжает работу),
-            но pipeline не блокируется.
+        call_timeout_seconds: максимальное время ожидания одного вызова аген��а.
         rate_limit_delay_seconds: задержка между вызовами агента.
-            Используется для предотвращения 429 (rate limit) от LLM API.
-            При ошибке предыдущего вызова задержка удваивается (backoff).
         rate_limit_backoff_on_error: множитель задержки при ошибке.
     """
     call_timeout_seconds: float = 30.0
@@ -34,8 +29,6 @@ class PipelineConfig:
     rate_limit_backoff_on_error: float = 2.0
 
 
-# Конфиг по умолчанию — без задержки (mock/тесты).
-# Для реальных API передавай PipelineConfig(rate_limit_delay_seconds=1.0).
 _DEFAULT_PIPELINE_CONFIG = PipelineConfig()
 
 
@@ -48,16 +41,6 @@ def _call_agent_with_timeout(
     Вызывает агента с ограничением по времени.
 
     Если агент не ответил за timeout_seconds — возвращает AgentResult с ошибкой.
-    Сам поток продолжает выполняться (нельзя принудительно завершить thread в Python),
-    но pipeline не блокируется.
-
-    Args:
-        agent: экземпляр агента
-        context: контекст выполнения
-        timeout_seconds: максимальное время ожидания
-
-    Returns:
-        AgentResult — успешный или с ошибкой таймаута
     """
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(agent.execute, context)
@@ -74,7 +57,8 @@ def _call_agent_with_timeout(
                 success=False,
                 error=(
                     f"TimeoutError: агент не ответил за {timeout_seconds}с. "
-                    f"Проверьте доступность LLM API или увеличьте PipelineConfig.call_timeout_seconds."
+                    f"Проверьте доступность LLM API или увеличьте "
+                    f"PipelineConfig.call_timeout_seconds."
                 ),
             )
 
@@ -84,28 +68,39 @@ def process_ticker(
     ticker: str,
     records: List[Dict[str, Any]],
     pipeline_config: Optional[PipelineConfig] = None,
+    anonymizer=None,
+    profile=None,
 ) -> List[Dict[str, Any]]:
     """
     Обрабатывает один тикер за период.
 
     Args:
         container: DI-контейнер с настроенным агентом
-        ticker: символ тикера
+        ticker: символ тикера (реальный — анонимизируется внутри если передан anonymizer)
         records: список записей [{year, price, dividend, yoy_change}, ...]
-        pipeline_config: настройки rate limiting и timeout.
-            None → используется _DEFAULT_PIPELINE_CONFIG (без задержки).
-            Для реальных API: PipelineConfig(rate_limit_delay_seconds=1.0, call_timeout_seconds=30.0)
+        pipeline_config: настройки rate limiting и timeout
+        anonymizer: экземпляр Anonymizer (опционально).
+            Если передан — тикер анонимизируется перед передачей в LLM.
+        profile: UserProfile (опционально).
+            Если передан — результаты фильтруются по профилю.
 
     Returns:
-        Список результатов по каждому году
+        Список результатов по каждому году.
+        Поле 'ticker' содержит реальный тикер (деанонимизация не нужна —
+        мы сами знаем реальный тикер на этом уровне).
     """
     if not records:
         return []
 
     cfg = pipeline_config or _DEFAULT_PIPELINE_CONFIG
 
-    # Агент создаётся один раз — он stateless.
-    # Factory автоматически инжектит llm_adapter и prompt_manager.
+    # Анонимизация тикера перед передачей в LLM
+    if anonymizer is not None:
+        llm_ticker = anonymizer.anonymize_ticker(ticker)
+        logger.debug("Anonymizer: %r → %r", ticker, llm_ticker)
+    else:
+        llm_ticker = ticker
+
     agent = container.factory.create_agent(
         agent_type="event_generation",
         config=container.config,
@@ -119,7 +114,6 @@ def process_ticker(
         year = record["year"]
         logger.info("Processing %s / %d", ticker, year)
 
-        # S4: rate limiting — задержка перед каждым вызовом (кроме первого)
         if i > 0 and current_delay > 0:
             logger.debug(
                 "Rate limit delay: %.2fs перед %s/%d",
@@ -131,7 +125,8 @@ def process_ticker(
             agent_id=f"{ticker}-{year}",
             task="event_generation",
             metadata={
-                "ticker": ticker,
+                # LLM видит анонимный тикер
+                "ticker": llm_ticker,
                 "year": year,
                 "price": record["price"],
                 "dividend": record["dividend"],
@@ -139,16 +134,18 @@ def process_ticker(
             },
         )
 
-        # M6: timeout на уровне pipeline
         result: AgentResult = _call_agent_with_timeout(
             agent=agent,
             context=context,
             timeout_seconds=cfg.call_timeout_seconds,
         )
 
+        # Сохраняем реальный тикер в результате (не анонимный)
         results.append({
             "ticker": ticker,
             "year": year,
+            "price": record["price"],
+            "dividend": record["dividend"],
             "success": result.success,
             "data": result.data,
             "error": result.error,
@@ -157,7 +154,6 @@ def process_ticker(
         })
 
         if result.success:
-            # Сброс backoff при успехе
             current_delay = cfg.rate_limit_delay_seconds
             logger.info(
                 "  ✓ %s/%d: %s (confidence=%.2f, %dms)",
@@ -167,11 +163,10 @@ def process_ticker(
                 result.duration_ms or 0,
             )
         else:
-            # S4: backoff при ошибке — увеличиваем задержку
             if cfg.rate_limit_delay_seconds > 0:
                 current_delay = min(
                     current_delay * cfg.rate_limit_backoff_on_error,
-                    60.0,  # максимум 60 секунд
+                    60.0,
                 )
                 logger.warning(
                     "  ✗ %s/%d: %s (следующая задержка: %.2fs)",
@@ -179,5 +174,17 @@ def process_ticker(
                 )
             else:
                 logger.warning("  ✗ %s/%d: %s", ticker, year, result.error)
+
+    # Фильтрация по профилю если передан
+    if profile is not None:
+        from agents.core.profiles.profile_validator import ProfileValidator
+        validator = ProfileValidator(profile)
+        passed, rejected = validator.split_results(results)
+        if rejected:
+            logger.info(
+                "ProfileValidator: отклонено %d/%d записей для %s",
+                len(rejected), len(results), ticker,
+            )
+        return passed
 
     return results
