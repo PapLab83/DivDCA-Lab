@@ -5,7 +5,7 @@ LLM Adapter — единый интерфейс для работы с разн�
 import hashlib
 import logging
 import threading
-from typing import Optional
+from typing import Callable, Dict, Optional, Type
 
 from tenacity import (
     retry,
@@ -26,16 +26,41 @@ from agents.core.llm.exceptions import LLMTransientError
 logger = logging.getLogger(__name__)
 
 
+def _build_default_engine_registry() -> Dict[LLMProvider, Type[BaseLLMEngine]]:
+    """
+    Строит дефолтный реестр движков.
+
+    Вынесен в функцию чтобы:
+    - не держать импорты на уровне модуля в реестре
+    - легко переопределять в тестах
+    """
+    return {
+        LLMProvider.OPENAI: OpenAIEngine,
+        LLMProvider.CLAUDE: ClaudeEngine,
+        LLMProvider.GEMINI: GeminiEngine,
+        LLMProvider.MOCK: MockEngine,
+    }
+
+
 class LLMAdapter:
     """
     Единый интерфейс для работы с разными LLM провайдерами.
 
     Ответственности:
-        - выбор engine по провайдеру
+        - выбор engine по провайдеру (через dict-based registry)
         - retry с exponential backoff (только LLMTransientError)
         - кэширование ответов (опционально)
         - подсчёт использованных токенов
+
+    Engine registry:
+        Расширяется через класс-метод register_engine() без изменения кода адаптера:
+            LLMAdapter.register_engine(LLMProvider.CUSTOM, CustomEngine)
     """
+
+    # Реестр движков на уровне класса.
+    # Инициализируется при первом обращении через _get_engine_registry().
+    _engine_registry: Optional[Dict[LLMProvider, Type[BaseLLMEngine]]] = None
+    _registry_lock = threading.Lock()
 
     def __init__(
         self,
@@ -43,12 +68,6 @@ class LLMAdapter:
         api_config: Optional[ApiConfig] = None,
         cache: Optional[CacheProtocol] = None,
     ):
-        """
-        Args:
-            config: конфигурация LLM (provider, model, temperature и т.д.)
-            api_config: конфигурация API-подключения (ключ, base_url, retries)
-            cache: экземпляр, реализующий CacheProtocol (опционально)
-        """
         self.config = config
         self.api_config = api_config or ApiConfig()
         self.cache = cache
@@ -56,10 +75,9 @@ class LLMAdapter:
         self._tokens_used: int = 0
         self._lock = threading.Lock()
 
-        # Retry-обёртки — единственное место определения retry-логики.
-        # Параметры берутся из api_config.retries.
-        self._call_with_retry = self._make_retry(self._call_engine)
-        self._acall_with_retry = self._make_async_retry(self._acall_engine)
+        # Единый _make_retry для sync и async
+        self._call_with_retry = self._make_retry(self._call_engine, is_async=False)
+        self._acall_with_retry = self._make_retry(self._acall_engine, is_async=True)
 
         logger.debug(
             "LLMAdapter инициализирован: provider=%s, model=%s, retries=%d",
@@ -68,64 +86,118 @@ class LLMAdapter:
             self.api_config.retries,
         )
 
+    # ── Engine registry (class-level) ─────────────────────────────
+
+    @classmethod
+    def _get_engine_registry(cls) -> Dict[LLMProvider, Type[BaseLLMEngine]]:
+        """
+        Возвращает реестр движков, инициализируя при первом вызове.
+        Потокобезопасно.
+        """
+        if cls._engine_registry is None:
+            with cls._registry_lock:
+                if cls._engine_registry is None:
+                    cls._engine_registry = _build_default_engine_registry()
+        return cls._engine_registry
+
+    @classmethod
+    def register_engine(
+        cls,
+        provider: LLMProvider,
+        engine_class: Type[BaseLLMEngine],
+    ) -> None:
+        """
+        Регистрирует новый engine для провайдера.
+
+        Plugin pattern: позволяет добавлять провайдеры без изменения кода адаптера.
+
+        Args:
+            provider: идентификатор провайдера
+            engine_class: класс engine (наследник BaseLLMEngine)
+
+        Пример:
+            LLMAdapter.register_engine(LLMProvider.CUSTOM, MyCustomEngine)
+            adapter = LLMAdapter(LLMConfig(provider="custom"))
+        """
+        if not issubclass(engine_class, BaseLLMEngine):
+            raise TypeError(
+                f"{engine_class.__name__} должен быть наследником BaseLLMEngine"
+            )
+        registry = cls._get_engine_registry()
+        with cls._registry_lock:
+            registry[provider] = engine_class
+        logger.info(
+            "LLMAdapter: зарегистрирован engine %s для провайдера '%s'",
+            engine_class.__name__, provider,
+        )
+
+    @classmethod
+    def list_providers(cls) -> list:
+        """Список зарегистрированных провайдеров."""
+        return list(cls._get_engine_registry().keys())
+
     # ── engine init ───────────────────────────────────────────────
 
     def _init_engine(self) -> BaseLLMEngine:
-        """Создаёт engine по провайдеру из конфига."""
-        engines = {
-            LLMProvider.OPENAI: OpenAIEngine,
-            LLMProvider.CLAUDE: ClaudeEngine,
-            LLMProvider.GEMINI: GeminiEngine,
-            LLMProvider.MOCK: MockEngine,
-        }
+        """
+        Создаёт engine по провайдеру из реестра.
 
-        engine_class = engines.get(self.config.provider)
+        Использует dict-based registry вместо switch/if-elif цепочки.
+        Новые провайдеры добавляются через register_engine() без изменения этого метода.
+        """
+        registry = self._get_engine_registry()
+        engine_class = registry.get(self.config.provider)
+
         if engine_class is None:
+            available = list(registry.keys())
             raise ValueError(
                 f"Неизвестный провайдер: {self.config.provider}. "
-                f"Доступные: {list(engines.keys())}"
+                f"Доступные: {available}. "
+                f"Добавьте провайдер через LLMAdapter.register_engine()."
             )
 
+        # MockEngine не требует api_config
         if self.config.provider == LLMProvider.MOCK:
             return engine_class(self.config)
 
         return engine_class(self.config, self.api_config)
 
-    # ── retry factory ─────────────────────────────────────────────
+    # ── retry factory (unified) ───────────────────────────────────
 
-    def _make_retry(self, fn):
+    def _make_retry(self, fn: Callable, *, is_async: bool) -> Callable:
         """
-        Оборачивает синхронную функцию retry-логикой.
-        Параметры retry берутся из api_config.
+        Единая фабрика retry-обёрток для sync и async функций.
+
+        Tenacity корректно определяет async-функции и применяет
+        соответствующую логику ожидания.
+
+        Args:
+            fn: функция для оборачивания (sync или async)
+            is_async: подсказка для логирования; tenacity сам определяет тип
+
+        Returns:
+            Обёрнутая функция с retry-логикой
         """
-        return retry(
+        decorator = retry(
             stop=stop_after_attempt(self.api_config.retries),
             wait=wait_exponential(multiplier=1, min=1, max=10),
             retry=retry_if_exception_type(LLMTransientError),
             before_sleep=before_sleep_log(logger, logging.WARNING),
             reraise=True,
-        )(fn)
-
-    def _make_async_retry(self, fn):
-        """
-        Оборачивает асинхронную функцию retry-логикой.
-        Tenacity корректно работает с async-функциями.
-        """
-        return retry(
-            stop=stop_after_attempt(self.api_config.retries),
-            wait=wait_exponential(multiplier=1, min=1, max=10),
-            retry=retry_if_exception_type(LLMTransientError),
-            before_sleep=before_sleep_log(logger, logging.WARNING),
-            reraise=True,
-        )(fn)
+        )
+        wrapped = decorator(fn)
+        logger.debug(
+            "LLMAdapter: retry настроен для %s (%s, attempts=%d)",
+            fn.__name__,
+            "async" if is_async else "sync",
+            self.api_config.retries,
+        )
+        return wrapped
 
     # ── engine calls (без retry, без кэша) ────────────────────────
 
     def _call_engine(self, prompt: str) -> str:
-        """
-        Один синхронный вызов engine.
-        Retry и кэш — на уровне выше.
-        """
+        """Один синхронный вызов engine."""
         try:
             llm_response: LLMResponse = self.engine.call(prompt)
         except LLMTransientError:
@@ -137,10 +209,7 @@ class LLMAdapter:
         return llm_response.text
 
     async def _acall_engine(self, prompt: str) -> str:
-        """
-        Один асинхронный вызов engine.
-        Retry и кэш — на уровне выше.
-        """
+        """Один асинхронный вызов engine."""
         try:
             llm_response: LLMResponse = await self.engine.acall(prompt)
         except LLMTransientError:
@@ -154,12 +223,7 @@ class LLMAdapter:
     # ── cache helpers ─────────────────────────────────────────────
 
     def _cache_key(self, prompt: str) -> str:
-        """
-        Генерирует ключ кэша из промпта + параметров модели.
-
-        Одинаковый промпт с разными provider/model/temperature
-        даёт разные ключи → нет коллизий.
-        """
+        """Генерирует ключ кэша из промпта + параметров модели."""
         components = (
             prompt,
             str(self.config.provider),
@@ -171,7 +235,7 @@ class LLMAdapter:
         return hashlib.sha256(combined.encode("utf-8")).hexdigest()
 
     def _cache_get(self, prompt: str) -> Optional[str]:
-        """Проверяет кэш. Возвращает None при отсутствии или если кэш отключён."""
+        """Проверяет кэш."""
         if self.cache is None:
             return None
         key = self._cache_key(prompt)
@@ -181,7 +245,7 @@ class LLMAdapter:
         return cached
 
     def _cache_set(self, prompt: str, response: str) -> None:
-        """Сохраняет ответ в кэш, если кэш подключён."""
+        """Сохраняет ответ в кэш."""
         if self.cache is None:
             return
         key = self._cache_key(prompt)
@@ -209,30 +273,14 @@ class LLMAdapter:
     def call(self, prompt: str) -> str:
         """
         Синхронный вызов LLM.
-
         Порядок: cache check → engine call (с retry) → cache save.
-
-        Args:
-            prompt: текст промпта
-
-        Returns:
-            Текст ответа от LLM
-
-        Raises:
-            LLMTransientError: после исчерпания retry
-            RuntimeError: engine не инициализирован или неожиданная ошибка
         """
-        # Cache check
         cached = self._cache_get(prompt)
         if cached is not None:
             return cached
 
-        # Engine call с retry
         response = self._call_with_retry(prompt)
-
-        # Cache save
         self._cache_set(prompt, response)
-
         return response
 
     # ── public: async ─────────────────────────────────────────────
@@ -240,28 +288,12 @@ class LLMAdapter:
     async def acall(self, prompt: str) -> str:
         """
         Асинхронный вызов LLM.
-
         Порядок: cache check → async engine call (с retry) → cache save.
-
-        Args:
-            prompt: текст промпта
-
-        Returns:
-            Текст ответа от LLM
-
-        Raises:
-            LLMTransientError: после исчерпания retry
-            RuntimeError: engine не инициализирован или неожиданная ошибка
         """
-        # Cache check (sync — InMemoryCache потокобезопасный, не блокирует надолго)
         cached = self._cache_get(prompt)
         if cached is not None:
             return cached
 
-        # Async engine call с retry
         response = await self._acall_with_retry(prompt)
-
-        # Cache save
         self._cache_set(prompt, response)
-
         return response
