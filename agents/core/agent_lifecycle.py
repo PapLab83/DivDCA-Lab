@@ -20,6 +20,11 @@ AgentLifecycle — управление жизненным циклом выпо
     ...
     result = lifecycle.finalize(context, start, raw_result)
 """
+
+__all__ = [
+    "AgentLifecycle",
+]
+
 import logging
 import time
 from dataclasses import replace

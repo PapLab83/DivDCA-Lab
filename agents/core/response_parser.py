@@ -17,6 +17,11 @@ ResponseParser — парсинг и валидация ответов LLM.
     parser = ResponseParser(required_fields={"reason_short", "confidence"})
     data = parser.parse(raw_response)   # Dict[str, Any] или LLMParseError
 """
+
+__all__ = [
+    "ResponseParser",
+]
+
 import json
 import logging
 import re

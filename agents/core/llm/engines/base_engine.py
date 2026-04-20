@@ -5,6 +5,11 @@
 Исключения определены в agents.core.llm.exceptions (единственный source of truth).
 """
 
+__all__ = [
+    "LLMResponse",
+    "BaseLLMEngine",
+]
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import AsyncIterator, Iterator

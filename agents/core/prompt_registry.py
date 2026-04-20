@@ -17,6 +17,12 @@ Prompt Registry — учёт версий промптов с Git-интегра
     print(snapshot.git_commit)   # abc1234
     print(snapshot.version)      # 1.0.0
 """
+
+__all__ = [
+    "PromptSnapshot",
+    "PromptRegistry",
+]
+
 import logging
 import subprocess
 from dataclasses import dataclass, field

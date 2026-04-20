@@ -2,6 +2,13 @@
 Валидатор совместимости агента с конфигурацией.
 Единственная ответственность — проверка ограничений.
 """
+
+__all__ = [
+    "ValidationError",
+    "ValidationResult",
+    "AgentValidator",
+]
+
 import logging
 from dataclasses import dataclass
 from typing import List, Optional, Tuple

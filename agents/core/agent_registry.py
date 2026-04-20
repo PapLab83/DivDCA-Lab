@@ -3,6 +3,13 @@
 Хранит описание, версию, входные/выходные данные и класс каждого агента.
 Единый источник правды — Factory делегирует хранение классов сюда.
 """
+
+__all__ = [
+    "AgentMetadata",
+    "AgentNotFoundError",
+    "AgentRegistry",
+]
+
 import logging
 import threading
 from dataclasses import dataclass, field

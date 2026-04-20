@@ -5,6 +5,11 @@ DI-контейнер — единая точка сборки всех зави
 их через свойства. Не является singleton — можно создавать
 несколько экземпляров (тесты, multi-tenant, A/B).
 """
+
+__all__ = [
+    "Container",
+]
+
 import logging
 from pathlib import Path
 from typing import Optional, cast

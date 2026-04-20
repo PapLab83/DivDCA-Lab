@@ -15,7 +15,14 @@ Prompt Manager — сборка промптов из компонентов с 
     snapshot = pm.registry.get_snapshot("event_generation")
     print(snapshot.identity())  # event_generation@1.0.0#abc1234
 """
+
 from __future__ import annotations
+
+__all__ = [
+    "PromptTemplate",
+    "PromptNotFoundError",
+    "PromptManager",
+]
 
 import logging
 from copy import deepcopy

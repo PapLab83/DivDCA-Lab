@@ -2,6 +2,11 @@
 """
 Оркестратор: координация обработки всех тикеров.
 """
+
+__all__ = [
+    "run_collection",
+]
+
 import logging
 from typing import Any, Dict, List, Optional
 

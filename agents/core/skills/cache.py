@@ -2,6 +2,11 @@
 In-memory кэш для LLM ответов.
 Реализует CacheProtocol из base_agent.py.
 """
+
+__all__ = [
+    "InMemoryCache",
+]
+
 import logging
 import threading
 from collections import OrderedDict

@@ -2,6 +2,11 @@
 LLM Adapter — единый интерфейс для работы с разными LLM провайдерами.
 Включает retry логику (tenacity), подсчёт токенов и опциональный кэш.
 """
+
+__all__ = [
+    "LLMAdapter",
+]
+
 import hashlib
 import logging
 import threading

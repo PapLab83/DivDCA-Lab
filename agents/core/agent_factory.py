@@ -4,6 +4,11 @@
 Поддерживает default-зависимости (llm_adapter, prompt_manager),
 которые инжектируются автоматически при создании агента.
 """
+
+__all__ = [
+    "AgentFactory",
+]
+
 import logging
 from typing import List, Optional, Type
 

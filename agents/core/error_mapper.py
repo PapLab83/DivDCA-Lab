@@ -22,6 +22,12 @@ ErrorMapper — маппинг исключений в AgentResult.
         ValueError: lambda e: AgentResult(success=False, error=f"Bad input: {e}"),
     })
 """
+
+__all__ = [
+    "ErrorMapper",
+    "ErrorHandler",
+]
+
 import logging
 from typing import Callable, Dict, Optional, Type
 from dataclasses import replace
