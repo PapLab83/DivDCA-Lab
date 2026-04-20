@@ -129,7 +129,7 @@ def main() -> None:
     for ticker, records in results.items():
         logger.info("--- %s ---", ticker)
         for r in records:
-            if r["success"]:
+            if r["success"] and r.get("data"):
                 data = r["data"]
                 logger.info(
                     "  %d: %s (confidence=%s, %sms)",
