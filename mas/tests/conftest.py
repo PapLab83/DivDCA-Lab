@@ -1,12 +1,17 @@
+# mas/tests/conftest.py
 """
 Фикстуры для тестов mas pipeline-слоя.
 
 Тестовые агенты импортируются из agents.tests.shared_agents —
 единственного источника правды. Дублирования нет.
+
+Соглашение об именовании фикстур:
+    container_*  — фикстуры возвращающие Container (для integration тестов)
+    agent_*      — фикстуры возвращающие готового агента (для unit тестов pipeline)
 """
 import pytest
 
-from agents.core.base_agent import AgentConfig, LLMConfig, LLMProvider
+from agents.core.base_agent import AgentConfig, BaseAgent, LLMConfig, LLMProvider
 from agents.core.container import Container
 from agents.tasks.event_generation.agent import EventGenerationAgent
 from agents.tests.shared_agents import (
@@ -28,31 +33,7 @@ def mock_config() -> AgentConfig:
     )
 
 
-# ── Контейнеры ────────────────────────────────────────────────────
-
-@pytest.fixture
-def container_with_success_agent(mock_config) -> Container:
-    """Контейнер с агентом, который всегда успешен."""
-    container = Container(mock_config)
-    container.factory.register("event_generation", AlwaysSuccessAgent)
-    return container
-
-
-@pytest.fixture
-def container_with_fail_agent(mock_config) -> Container:
-    """Контейнер с агентом, который всегда падает."""
-    container = Container(mock_config)
-    container.factory.register("event_generation", AlwaysFailAgent)
-    return container
-
-
-@pytest.fixture
-def container_with_partial_fail_agent(mock_config) -> Container:
-    """Контейнер с агентом, который падает на чётных годах."""
-    container = Container(mock_config)
-    container.factory.register("event_generation", PartialFailAgent)
-    return container
-
+# ── Контейнеры (для integration тестов) ──────────────────────────
 
 @pytest.fixture
 def integration_container(mock_config) -> Container:
@@ -64,6 +45,38 @@ def integration_container(mock_config) -> Container:
     container = Container(mock_config)
     container.factory.register("event_generation", EventGenerationAgent)
     return container
+
+
+# ── Агенты (для unit тестов pipeline и оркестратора) ─────────────
+
+@pytest.fixture
+def success_agent(mock_config) -> BaseAgent:
+    """Агент который всегда возвращает успех."""
+    return AlwaysSuccessAgent(mock_config)
+
+
+@pytest.fixture
+def fail_agent(mock_config) -> BaseAgent:
+    """Агент который всегда падает с исключением."""
+    return AlwaysFailAgent(mock_config)
+
+
+@pytest.fixture
+def partial_fail_agent(mock_config) -> BaseAgent:
+    """Агент который падает на чётных годах."""
+    return PartialFailAgent(mock_config)
+
+
+@pytest.fixture
+def integration_agent(integration_container) -> BaseAgent:
+    """
+    Реальный EventGenerationAgent из integration-контейнера.
+    Использует MockEngine — без внешних API вызовов.
+    """
+    return integration_container.factory.create_agent(
+        agent_type="event_generation",
+        config=integration_container.config,
+    )
 
 
 # ── Данные ────────────────────────────────────────────────────────

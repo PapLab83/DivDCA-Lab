@@ -1,10 +1,11 @@
+# mas/price_drivers_collection/orchestrator.py
 """
 Оркестратор: координация обработки всех тикеров.
 """
 import logging
 from typing import Any, Dict, List, Optional
 
-from agents.core.container import Container
+from agents.core.base_agent import BaseAgent
 from agents.core.profiles import UserProfile
 from mas.price_drivers_collection.pipeline import process_ticker
 
@@ -12,15 +13,19 @@ logger = logging.getLogger(__name__)
 
 
 def run_collection(
-    container: Container,
+    agent: BaseAgent,
     tickers_data: List[Dict[str, Any]],
     profile: Optional[UserProfile] = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Запускает pipeline для каждого тикера.
 
+    Агент создаётся снаружи (в run.py) и передаётся готовым.
+    Один экземпляр агента переиспользуется для всех тикеров —
+    агент stateless, это безопасно и эффективно.
+
     Args:
-        container: DI-контейнер с настроенным агентом
+        agent: готовый экземпляр агента.
         tickers_data: список [{ticker, records: [...]}, ...]
         profile: UserProfile (опционально).
             Если передан — результаты каждого тикера фильтруются
@@ -28,7 +33,6 @@ def run_collection(
 
     Returns:
         {ticker: [результаты по годам]}
-        Ключи словаря — реальные тикеры (не анонимные).
     """
     all_results: Dict[str, List[Dict[str, Any]]] = {}
     total_success = 0
@@ -47,16 +51,13 @@ def run_collection(
         logger.info("=" * 50)
 
         results = process_ticker(
-            container,
-            ticker,
-            records,
+            agent=agent,
+            ticker=ticker,
+            records=records,
             profile=profile,
         )
         all_results[ticker] = results
 
-        # Подсчёт статистики
-        # Если profile активен — results уже отфильтрованы,
-        # поэтому считаем отдельно сырые записи для статистики filtered.
         raw_count = len(ticker_data["records"])
         returned_count = len(results)
 

@@ -1,3 +1,4 @@
+# mas/price_drivers_collection/run.py
 """
 Точка входа: python -m mas.price_drivers_collection.run
 
@@ -14,7 +15,10 @@ import sys
 from typing import Any, Dict, List, Callable
 
 from agents.core.profiles import AggressivenessLevel, UserProfile
-from mas.price_drivers_collection.app_factory import build_app_container
+from mas.price_drivers_collection.app_factory import (
+    build_app_container,
+    build_event_generation_agent,
+)
 from mas.price_drivers_collection.orchestrator import run_collection
 
 logger = logging.getLogger(__name__)
@@ -84,9 +88,6 @@ def format_results(results: Dict[str, List[Dict[str, Any]]]) -> None:
     """
     Выводит результаты оркестрации в лог.
 
-    Отделена от main() чтобы логику вывода можно было
-    тестировать и переиспользовать независимо.
-
     Args:
         results: {ticker: [результаты по годам]}
     """
@@ -140,22 +141,27 @@ def main() -> None:
     # 1. Собираем контейнер и регистрируем агентов
     container = build_app_container()
 
-    # 2. Загружаем данные
+    # 2. Создаём агента один раз — до цикла по тикерам.
+    #    Агент stateless: один экземпляр безопасно переиспользуется
+    #    для всех тикеров и всех лет.
+    agent = build_event_generation_agent(container)
+
+    # 3. Загружаем данные
     tickers_data = load_data(data_source)
 
-    # 3. UserProfile — читаем из ENV, fallback → conservative
+    # 4. UserProfile — читаем из ENV, fallback → conservative
     profile_level = os.getenv("USER_PROFILE", AggressivenessLevel.CONSERVATIVE)
     profile = load_profile(profile_level)
     logger.info("UserProfile: %s", profile)
 
-    # 4. Запускаем оркестрацию
+    # 5. Запускаем оркестрацию
     results = run_collection(
-        container,
-        tickers_data,
+        agent=agent,
+        tickers_data=tickers_data,
         profile=profile,
     )
 
-    # 5. Выводим результаты
+    # 6. Выводим результаты
     format_results(results)
 
 

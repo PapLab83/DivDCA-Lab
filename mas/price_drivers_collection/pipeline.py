@@ -1,3 +1,4 @@
+# mas/price_drivers_collection/pipeline.py
 """
 Pipeline для обработки одного тикера за период.
 Вызывает агента для каждого года, собирает результаты.
@@ -8,8 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from agents.core.base_agent import AgentContext, AgentResult
-from agents.core.container import Container
+from agents.core.base_agent import AgentContext, AgentResult, BaseAgent
 from agents.core.profiles import UserProfile
 from agents.core.profiles.profile_validator import ProfileValidator
 
@@ -37,7 +37,7 @@ _DEFAULT_PIPELINE_CONFIG = PipelineConfig()
 
 
 def _call_agent_with_timeout(
-    agent,
+    agent: BaseAgent,
     context: AgentContext,
     timeout_seconds: float,
     executor: ThreadPoolExecutor,
@@ -76,7 +76,7 @@ def _call_agent_with_timeout(
 
 
 def process_ticker(
-    container: Container,
+    agent: BaseAgent,
     ticker: str,
     records: List[Dict[str, Any]],
     pipeline_config: Optional[PipelineConfig] = None,
@@ -85,8 +85,13 @@ def process_ticker(
     """
     Обрабатывает один тикер за период.
 
+    Агент создаётся снаружи и передаётся готовым — pipeline не знает
+    о Factory, Registry и Container. Один экземпляр агента переиспользуется
+    для всех записей тикера.
+
     Args:
-        container: DI-контейнер с настроенным агентом
+        agent: готовый экземпляр агента (создаётся в оркестраторе).
+            Агент stateless — безопасно переиспользовать между записями.
         ticker: символ тикера. Ожидается что данные уже анонимизированы
                 на уровне БД — pipeline не выполняет анонимизацию.
         records: список записей [{year, price, dividend, yoy_change}, ...]
@@ -101,11 +106,6 @@ def process_ticker(
         return []
 
     cfg = pipeline_config or _DEFAULT_PIPELINE_CONFIG
-    agent = container.factory.create_agent(
-        agent_type="event_generation",
-        config=container.config,
-    )
-
     results = []
     current_delay = cfg.rate_limit_delay_seconds
 

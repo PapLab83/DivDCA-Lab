@@ -1,3 +1,4 @@
+# mas/price_drivers_collection/app_factory.py
 """
 Фабрика приложения — сборка DI-контейнера и регистрация агентов.
 
@@ -8,11 +9,12 @@
 
 Использование:
     container = build_app_container()
-    agent = container.factory.create_agent("event_generation", container.config)
+    agent = build_event_generation_agent(container)
 """
 import logging
 
 from agents.config import build_container
+from agents.core.base_agent import BaseAgent
 from agents.core.container import Container
 from agents.tasks.event_generation.agent import EventGenerationAgent
 
@@ -50,3 +52,37 @@ def build_app_container() -> Container:
     )
 
     return container
+
+
+def build_event_generation_agent(container: Container) -> BaseAgent:
+    """
+    Создаёт готового EventGenerationAgent из контейнера.
+
+    Единственная точка где знание об "event_generation" как строке
+    живёт в app_factory — это конфигурация приложения, не pipeline-логика.
+
+    Агент получает llm_adapter и prompt_manager автоматически
+    через default-зависимости Container'а.
+
+    Args:
+        container: собранный DI-контейнер (из build_app_container())
+
+    Returns:
+        Готовый к использованию EventGenerationAgent.
+
+    Использование:
+        container = build_app_container()
+        agent = build_event_generation_agent(container)
+        run_collection(agent, tickers_data)
+    """
+    agent = container.factory.create_agent(
+        agent_type="event_generation",
+        config=container.config,
+    )
+    logger.info(
+        "Создан агент: %s (provider=%s, model=%s)",
+        agent.__class__.__name__,
+        container.config.llm_config.provider,
+        container.config.llm_config.model,
+    )
+    return agent
