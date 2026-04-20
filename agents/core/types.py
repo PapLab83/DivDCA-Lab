@@ -124,7 +124,7 @@ class AgentConfig:
 
 # ─────────────────────────── Context ──────────────────────────────
 
-@dataclass
+@dataclass(frozen=True)
 class AgentContext:
     """Контекст выполнения агента (иммутабельный по соглашению)."""
     agent_id: str
@@ -133,7 +133,7 @@ class AgentContext:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
+@dataclass(frozen=True)
 class FinancialAgentContext(AgentContext):
     """Контекст для финансовых агентов."""
     ticker: str = ""

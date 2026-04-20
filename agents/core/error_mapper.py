@@ -24,6 +24,7 @@ ErrorMapper — маппинг исключений в AgentResult.
 """
 import logging
 from typing import Callable, Dict, Optional, Type
+from dataclasses import replace
 
 from agents.core.types import AgentResult
 
@@ -82,7 +83,6 @@ class ErrorMapper:
             result = self._dispatch(error)
             # Гарантируем agent_class в metadata
             metadata = {**result.metadata, "agent_class": agent_class_name}
-            from dataclasses import replace
             return replace(result, metadata=metadata)
         except Exception as inner:
             logger.critical(
