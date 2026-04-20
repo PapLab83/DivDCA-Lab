@@ -64,14 +64,19 @@ class TestProcessTickerSuccess:
             assert r["year"] == record["year"]
 
     def test_data_contains_agent_output(self, success_agent, single_ticker_data):
+        """
+        AlwaysSuccessAgent возвращает {"message": "ok"}.
+        Проверяем что data не None и содержит ожидаемый ключ агента.
+        """
         results = process_ticker(
             agent=success_agent,
             ticker=single_ticker_data["ticker"],
             records=single_ticker_data["records"],
         )
         for r in results:
-            assert "reason_short" in r["data"]
-            assert "confidence" in r["data"]
+            assert r["data"] is not None
+            assert "message" in r["data"]
+            assert r["data"]["message"] == "ok"
 
     def test_duration_is_non_negative(self, success_agent, single_ticker_data):
         results = process_ticker(
@@ -99,13 +104,18 @@ class TestProcessTickerFailure:
             assert r["data"] is None
 
     def test_error_contains_exception_info(self, fail_agent, single_ticker_data):
+        """
+        AlwaysFailAgent бросает ValueError("Тестовая ошибка").
+        ErrorMapper форматирует как "ValueError: Тестовая ошибка".
+        """
         results = process_ticker(
             agent=fail_agent,
             ticker=single_ticker_data["ticker"],
             records=single_ticker_data["records"],
         )
         for r in results:
-            assert "RuntimeError" in r["error"] or "Simulated" in r["error"]
+            assert "ValueError" in r["error"]
+            assert "Тестовая ошибка" in r["error"]
 
     def test_failure_does_not_stop_processing(self, fail_agent, single_ticker_data):
         """Pipeline должен обработать ВСЕ записи, даже если каждая падает."""
