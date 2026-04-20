@@ -5,6 +5,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from agents.core.container import Container
+from agents.core.profiles import UserProfile
 from mas.price_drivers_collection.pipeline import process_ticker
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 def run_collection(
     container: Container,
     tickers_data: List[Dict[str, Any]],
-    profile=None,
+    profile: Optional[UserProfile] = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Запускает pipeline для каждого тикера.
