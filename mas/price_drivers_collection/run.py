@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Callable
 
 from agents.config import build_container
 from agents.core.profiles import AggressivenessLevel, UserProfile
@@ -56,10 +56,10 @@ def load_profile(level: str) -> UserProfile:
         UserProfile соответствующего уровня.
         Если уровень неизвестен — возвращает conservative с предупреждением.
     """
-    profile_map: Dict[str, Any] = {
-        AggressivenessLevel.CONSERVATIVE: UserProfile.conservative,
-        AggressivenessLevel.MODERATE: UserProfile.moderate,
-        AggressivenessLevel.AGGRESSIVE: UserProfile.aggressive,
+    profile_map: Dict[str, Callable[[], UserProfile]] = {
+        str(AggressivenessLevel.CONSERVATIVE): UserProfile.conservative,
+        str(AggressivenessLevel.MODERATE): UserProfile.moderate,
+        str(AggressivenessLevel.AGGRESSIVE): UserProfile.aggressive,
     }
 
     factory = profile_map.get(level)
@@ -73,6 +73,7 @@ def load_profile(level: str) -> UserProfile:
         return UserProfile.conservative()
 
     return factory()
+
 
 
 def setup_logging() -> None:
