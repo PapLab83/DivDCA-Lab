@@ -7,8 +7,6 @@ import pytest_asyncio
 from agents.core.base_agent import (
     AgentConfig,
     AgentContext,
-    AgentResult,
-    BaseAgent,
     LLMConfig,
     LLMProvider,
 )
@@ -16,24 +14,10 @@ from agents.core.agent_factory import AgentFactory
 from agents.core.agent_registry import AgentRegistry
 from agents.core.container import Container
 
+from agents.tests.shared_agents import AlwaysSuccessAgent, AlwaysFailAgent
 
-# ── Тестовые агенты ───────────────────────────────────────────────
-
-class MockAgent(BaseAgent):
-    """Тестовый агент — всегда успешен."""
-
-    def _execute_internal(self, context: AgentContext) -> AgentResult:
-        return AgentResult(
-            success=True,
-            data={"message": "ok"},
-        )
-
-
-class FailingAgent(BaseAgent):
-    """Тестовый агент — всегда падает."""
-
-    def _execute_internal(self, context: AgentContext) -> AgentResult:
-        raise ValueError("Тестовая ошибка")
+MockAgent = AlwaysSuccessAgent
+FailingAgent = AlwaysFailAgent
 
 
 # ── Sync фикстуры ────────────────────────────────────────────────
