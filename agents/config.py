@@ -46,6 +46,20 @@ def load_llm_config(
     """
     yaml_llm = yaml_overrides.get("llm", {}) if yaml_overrides else {}
 
+    def _env_or_yaml(env_key: str, yaml_key: str, default):
+        """
+        Возвращает значение по приоритету: ENV → YAML → default.
+        Использует явную проверку на None чтобы корректно обрабатывать
+        falsy-значения (0, 0.0, "") из переменных окружения.
+        """
+        env_val = os.getenv(env_key)
+        if env_val is not None:
+            return env_val
+        yaml_val = yaml_llm.get(yaml_key)
+        if yaml_val is not None:
+            return yaml_val
+        return default
+
     return LLMConfig(
         provider=LLMProvider(
             provider
@@ -57,18 +71,9 @@ def load_llm_config(
             or os.getenv("LLM_MODEL")
             or yaml_llm.get("model", "gpt-4")
         ),
-        temperature=float(
-            os.getenv("LLM_TEMPERATURE")
-            or yaml_llm.get("temperature", 0.7)
-        ),
-        max_tokens=int(
-            os.getenv("LLM_MAX_TOKENS")
-            or yaml_llm.get("max_tokens", 1000)
-        ),
-        timeout_seconds=int(
-            os.getenv("LLM_TIMEOUT")
-            or yaml_llm.get("timeout_seconds", 30)
-        ),
+        temperature=float(_env_or_yaml("LLM_TEMPERATURE", "temperature", 0.7)),
+        max_tokens=int(_env_or_yaml("LLM_MAX_TOKENS", "max_tokens", 1000)),
+        timeout_seconds=int(_env_or_yaml("LLM_TIMEOUT", "timeout_seconds", 30)),
     )
 
 
