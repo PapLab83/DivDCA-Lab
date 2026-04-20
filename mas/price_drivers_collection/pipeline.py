@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 from agents.core.base_agent import AgentContext, AgentResult
 from agents.core.container import Container
+from agents.core.profiles.profile_validator import ProfileValidator
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,6 @@ def process_ticker(
 
     # Фильтрация по профилю если передан
     if profile is not None:
-        from agents.core.profiles.profile_validator import ProfileValidator
         validator = ProfileValidator(profile)
         passed, rejected = validator.split_results(results)
         if rejected:

@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 def run_collection(
     container: Container,
     tickers_data: List[Dict[str, Any]],
-    anonymizer=None,
     profile=None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
@@ -22,10 +21,6 @@ def run_collection(
     Args:
         container: DI-контейнер с настроенным агентом
         tickers_data: список [{ticker, records: [...]}, ...]
-        anonymizer: экземпляр Anonymizer (опционально).
-            Если передан — тикеры анонимизируются перед передачей в LLM.
-            Один экземпляр на сессию: карта real ↔ anonymous сохраняется
-            между всеми тикерами внутри одного вызова run_collection.
         profile: UserProfile (опционально).
             Если передан — результаты каждого тикера фильтруются
             по порогам confidence и dividend_yield из профиля.
@@ -38,12 +33,6 @@ def run_collection(
     total_success = 0
     total_fail = 0
     total_filtered = 0
-
-    if anonymizer is not None:
-        logger.info(
-            "Anonymizer активен: стратегия=%s",
-            anonymizer._strategy.__class__.__name__,
-        )
 
     if profile is not None:
         logger.info("UserProfile активен: %s", profile)

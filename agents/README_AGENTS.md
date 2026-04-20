@@ -156,8 +156,7 @@ agents/
 | LLM layer (Adapter, Engines, Exceptions, Cache)          |      ✅     |
 | Config (env + YAML)                                      |      ✅     |
 | Тесты ядра                                               |      ✅     |
-| PromptManager                                            |      ⬜     |
-| Anonymizer / De-anonymizer                               |      ⬜     |
+| PromptManager                                            |      ✅     |
 | Task-агенты                                              |      ⬜     |
 | Профили агрессивности                                    |      ⬜     |
 | Orchestrator                                             |      ⬜     |
