@@ -109,30 +109,30 @@ class AgentRegistry:
         logger.debug("Зарегистрированы метаданные для агента: %s", agent_type)
 
     def bind_class(
-        self,
-        agent_type: str,
-        agent_class: Type[BaseAgent],
+            self,
+            agent_type: str,
+            agent_class: Type[BaseAgent],
     ) -> None:
         """
         Привязывает класс агента к существующим метаданным.
         Если метаданных нет — создаёт минимальные автоматически.
+
+        Использует dataclasses.replace для обновления agent_class —
+        все остальные поля метаданных сохраняются без явного перечисления.
+        Это защищает от ошибок при добавлении новых полей в AgentMetadata.
         """
+        from dataclasses import replace as dc_replace
+
         if not issubclass(agent_class, BaseAgent):
             raise TypeError(
                 f"{agent_class.__name__} должен быть наследником BaseAgent"
             )
         with self._lock:
             if agent_type in self._agents:
-                existing = self._agents[agent_type]
-                # Обновляем только agent_class, метаданные сохраняем
-                self._agents[agent_type] = AgentMetadata(
-                    name=existing.name,
-                    description=existing.description,
-                    version=existing.version,
-                    inputs=existing.inputs,
-                    outputs=existing.outputs,
-                    prompt_components=existing.prompt_components,
-                    supported_providers=existing.supported_providers,
+                # dataclasses.replace: обновляем только agent_class,
+                # все остальные поля метаданных сохраняются автоматически.
+                self._agents[agent_type] = dc_replace(
+                    self._agents[agent_type],
                     agent_class=agent_class,
                 )
             else:
