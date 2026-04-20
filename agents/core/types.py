@@ -15,7 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Dict, Optional, Protocol, Tuple, runtime_checkable
+from types import MappingProxyType
+from typing import Any, Dict, Mapping, Optional, Protocol, Tuple, runtime_checkable
 
 from agents.core.llm.exceptions import LLMParseError  # noqa: F401  (re-export)
 
@@ -60,6 +61,28 @@ class LLMProvider(StrEnum):
     CLAUDE = "claude"
     GEMINI = "gemini"
     MOCK = "mock"
+
+
+# ─────────────────────────── Helpers ──────────────────────────────
+
+def make_metadata(data: Optional[Dict[str, Any]] = None) -> MappingProxyType:
+    """
+    Создаёт иммутабельный MappingProxyType для AgentContext.metadata.
+
+    Использование:
+        context = AgentContext(
+            agent_id="run-001",
+            task="event_generation",
+            metadata=make_metadata({"ticker": "AAPL", "year": 2021}),
+        )
+
+    Args:
+        data: исходный dict с данными. None → пустой proxy.
+
+    Returns:
+        MappingProxyType — read-only view, попытка записи бросает TypeError.
+    """
+    return MappingProxyType(data or {})
 
 
 # ─────────────────────────── Configs ──────────────────────────────
@@ -108,22 +131,58 @@ class ApiConfig:
 
 @dataclass
 class AgentConfig:
-    """Конфигурация агента."""
+    """
+    Конфигурация агента.
+
+    Attributes:
+        mode: режим работы агента
+        llm_config: конфигурация LLM провайдера
+        api_config: конфигурация API подключения
+        cache_enabled: включить кэш LLM ответов
+        prompts_path: путь к директории с YAML-промптами.
+            None → Container использует дефолтный путь (agents/prompts/).
+            Передайте явный путь для переопределения через ENV или тесты:
+                AgentConfig(prompts_path="/custom/prompts")
+            Читается из ENV: PROMPTS_PATH
+    """
     mode: AgentMode = AgentMode.API
     llm_config: LLMConfig = field(default_factory=LLMConfig)
     api_config: ApiConfig = field(default_factory=ApiConfig)
     cache_enabled: bool = True
+    prompts_path: Optional[str] = None
 
 
 # ─────────────────────────── Context ──────────────────────────────
 
 @dataclass(frozen=True)
 class AgentContext:
-    """Контекст выполнения агента (иммутабельный по соглашению)."""
+    """
+    Контекст выполнения агента.
+
+    metadata — иммутабельный MappingProxyType:
+        - попытка записи бросает TypeError (реальная защита, не только соглашение)
+        - создавайте через make_metadata({"key": "value"})
+        - или передавайте обычный dict — он будет автоматически обёрнут в __post_init__
+
+    Пример:
+        context = AgentContext(
+            agent_id="run-001",
+            task="event_generation",
+            metadata=make_metadata({"ticker": "AAPL", "year": 2021}),
+        )
+    """
     agent_id: str
     task: str
     start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=MappingProxyType)
+
+    def __post_init__(self) -> None:
+        # Автоматически оборачиваем dict в MappingProxyType для удобства:
+        #   AgentContext(metadata={"key": "val"})  — работает
+        #   AgentContext(metadata=make_metadata(...))  — тоже работает
+        if isinstance(self.metadata, dict):
+            # frozen=True не позволяет присваивать напрямую — используем object.__setattr__
+            object.__setattr__(self, "metadata", MappingProxyType(self.metadata))
 
 
 @dataclass(frozen=True)

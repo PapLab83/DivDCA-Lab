@@ -2,7 +2,7 @@
 Агент генерации событий — объясняет причины изменения дивидендов.
 """
 import logging
-from typing import Optional, Set
+from typing import Set
 
 from agents.core.base_agent import (
     AgentContext,
@@ -24,14 +24,6 @@ class EventGenerationAgent(BaseAgent):
     Ожидает в context.metadata:
         ticker, year, price, dividend, yoy_change
     """
-
-    def __init__(
-            self,
-            config: AgentConfig,
-            llm_adapter: Optional[LLMAdapterProtocol] = None,
-            prompt_manager: Optional[PromptManagerProtocol] = None,
-    ):
-        super().__init__(config, llm_adapter, prompt_manager)
 
     def _execute_internal(self, context: AgentContext) -> AgentResult:
         meta = context.metadata

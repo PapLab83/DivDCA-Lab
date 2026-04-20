@@ -24,6 +24,10 @@ from agents.core.prompt_manager import PromptManager
 
 logger = logging.getLogger(__name__)
 
+# Дефолтный путь к промптам относительно пакета agents.
+# Используется если AgentConfig.prompts_path не задан.
+_DEFAULT_PROMPTS_PATH = Path(__file__).parent.parent / "prompts"
+
 
 class Container:
     """
@@ -33,13 +37,18 @@ class Container:
         config → cache → llm_adapter → prompt_manager
         registry → validator → factory(с defaults)
 
+    Путь к промптам:
+        Приоритет: config.prompts_path → дефолтный путь (agents/prompts/).
+        Передайте AgentConfig(prompts_path="...") для переопределения.
+
     Использование:
         container = Container(config)
         agent = container.factory.create_agent("event_gen", config)
         # agent уже имеет llm_adapter и prompt_manager
 
     Тесты:
-        container = Container(mock_config)  # изолированный экземпляр
+        config = AgentConfig(prompts_path="/tmp/test_prompts")
+        container = Container(config)  # изолированный экземпляр
     """
 
     def __init__(
@@ -67,15 +76,21 @@ class Container:
         )
 
         # ── PromptManager ──
-        prompts_path = Path(__file__).parent.parent / "prompts"
+        # Приоритет пути: config.prompts_path → дефолтный путь пакета
+        prompts_path = (
+            Path(config.prompts_path)
+            if config.prompts_path is not None
+            else _DEFAULT_PROMPTS_PATH
+        )
+
         if prompts_path.is_dir():
             self._prompt_manager: PromptManager = PromptManager.from_yaml(str(prompts_path))
         else:
-            # S3: явное предупреждение вместо молчаливого создания пустого менеджера
             logger.warning(
                 "Директория промптов не найдена: %s. "
                 "PromptManager создан пустым — агенты упадут при вызове get_prompt(). "
-                "Зарегистрируйте промпты вручную через prompt_manager.register().",
+                "Зарегистрируйте промпты вручную через prompt_manager.register() "
+                "или передайте корректный путь через AgentConfig(prompts_path=...).",
                 prompts_path,
             )
             self._prompt_manager = PromptManager()
@@ -92,10 +107,11 @@ class Container:
 
         logger.info(
             "Container создан: provider=%s, model=%s, cache=%s, "
-            "agents_total=%d, agents_bound=%d",
+            "prompts_path=%s, agents_total=%d, agents_bound=%d",
             config.llm_config.provider,
             config.llm_config.model,
             type(self._cache).__name__ if self._cache else "disabled",
+            prompts_path,
             len(self._registry.list_agents()),
             len(self._registry.list_bound_agents()),
         )

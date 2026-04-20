@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from agents.core.base_agent import BaseAgent
 from agents.core.profiles import UserProfile
-from mas.price_drivers_collection.pipeline import process_ticker
+from mas.price_drivers_collection.pipeline import PipelineConfig, process_ticker
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +16,7 @@ def run_collection(
     agent: BaseAgent,
     tickers_data: List[Dict[str, Any]],
     profile: Optional[UserProfile] = None,
+    pipeline_config: Optional[PipelineConfig] = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Запускает pipeline для каждого тикера.
@@ -30,6 +31,9 @@ def run_collection(
         profile: UserProfile (опционально).
             Если передан — результаты каждого тикера фильтруются
             по порогам confidence и dividend_yield из профиля.
+        pipeline_config: настройки pipeline (timeout, rate limit).
+            None → каждый process_ticker читает из ENV через PipelineConfig.from_env().
+            Передайте явно для переопределения в тестах или специальных сценариях.
 
     Returns:
         {ticker: [результаты по годам]}
@@ -54,6 +58,7 @@ def run_collection(
             agent=agent,
             ticker=ticker,
             records=records,
+            pipeline_config=pipeline_config,
             profile=profile,
         )
         all_results[ticker] = results

@@ -121,6 +121,7 @@ def load_agent_config(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     cache_enabled: bool = True,
+    prompts_path: Optional[str] = None,
     yaml_overrides: Optional[dict] = None,
 ) -> AgentConfig:
     """
@@ -130,8 +131,19 @@ def load_agent_config(
         provider: явный провайдер
         model: явная модель
         cache_enabled: включить кэш
+        prompts_path: путь к директории с YAML-промптами.
+            Приоритет: аргумент → ENV (PROMPTS_PATH) → None (Container использует дефолт).
         yaml_overrides: данные из YAML-конфига (fallback перед defaults)
+
+    Env vars:
+        PROMPTS_PATH: путь к директории с промптами
     """
+    resolved_prompts_path = (
+        prompts_path
+        or os.getenv("PROMPTS_PATH")
+        or (yaml_overrides.get("prompts_path") if yaml_overrides else None)
+    )
+
     config = AgentConfig(
         mode=AgentMode.API,
         llm_config=load_llm_config(
@@ -141,12 +153,14 @@ def load_agent_config(
         ),
         api_config=load_api_config(yaml_overrides=yaml_overrides),
         cache_enabled=cache_enabled,
+        prompts_path=resolved_prompts_path,
     )
     logger.info(
-        "Загружена конфигурация: provider=%s, model=%s, cache=%s",
+        "Загружена конфигурация: provider=%s, model=%s, cache=%s, prompts_path=%s",
         config.llm_config.provider,
         config.llm_config.model,
         config.cache_enabled,
+        config.prompts_path or "<default>",
     )
     return config
 
@@ -170,6 +184,7 @@ def try_load_yaml_config(path: str = "config.yaml") -> Optional[dict]:
           api_key: ""
           retries: 3
           timeout_seconds: 30
+        prompts_path: "agents/prompts"
     """
     config_path = Path(path)
     if not config_path.exists():
@@ -194,6 +209,7 @@ def build_container(
     provider: Optional[str] = None,
     model: Optional[str] = None,
     cache_enabled: bool = True,
+    prompts_path: Optional[str] = None,
     config_path: str = "config.yaml",
 ) -> Container:
     """
@@ -205,14 +221,16 @@ def build_container(
         provider: явный провайдер (приоритет над всем)
         model: явная модель (приоритет над всем)
         cache_enabled: включить кэш
+        prompts_path: путь к директории с промптами (приоритет над ENV и YAML).
+            None → читается из ENV PROMPTS_PATH → YAML prompts_path → дефолт пакета.
         config_path: путь к YAML-конфигу (default: config.yaml)
 
     Использование:
         container = build_container(provider="openai")
+        container = build_container(prompts_path="configs/prompts/")
         container = build_container(config_path="configs/prod.yaml")
         agent = container.factory.create_agent(...)
     """
-    # M3: результат YAML теперь используется как fallback
     yaml_overrides = try_load_yaml_config(config_path)
     if yaml_overrides:
         logger.info(
@@ -225,6 +243,7 @@ def build_container(
         provider=provider,
         model=model,
         cache_enabled=cache_enabled,
+        prompts_path=prompts_path,
         yaml_overrides=yaml_overrides,
     )
     return Container(config)

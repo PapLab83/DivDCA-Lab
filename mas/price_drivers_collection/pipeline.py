@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from agents.core.base_agent import AgentContext, AgentResult, BaseAgent
+from agents.core.types import make_metadata
 from agents.core.profiles import UserProfile
 from agents.core.profiles.profile_validator import ProfileValidator
 
@@ -32,8 +33,36 @@ class PipelineConfig:
     rate_limit_backoff_on_error: float = 2.0
     max_workers: int = 1
 
+    @classmethod
+    def from_env(cls) -> "PipelineConfig":
+        """
+        Создаёт PipelineConfig из переменных окружения.
 
-_DEFAULT_PIPELINE_CONFIG = PipelineConfig()
+        Приоритет: ENV vars → defaults в коде.
+
+        Env vars:
+            PIPELINE_CALL_TIMEOUT:       таймаут одного вызова агента (сек), default: 30.0
+            PIPELINE_RATE_LIMIT_DELAY:   задержка между вызовами (сек), default: 0.0
+            PIPELINE_RATE_LIMIT_BACKOFF: множитель задержки при ошибке, default: 2.0
+            PIPELINE_MAX_WORKERS:        потоков в ThreadPoolExecutor, default: 1
+        """
+        import os
+
+        defaults = cls()
+        return cls(
+            call_timeout_seconds=float(
+                os.getenv("PIPELINE_CALL_TIMEOUT", defaults.call_timeout_seconds)
+            ),
+            rate_limit_delay_seconds=float(
+                os.getenv("PIPELINE_RATE_LIMIT_DELAY", defaults.rate_limit_delay_seconds)
+            ),
+            rate_limit_backoff_on_error=float(
+                os.getenv("PIPELINE_RATE_LIMIT_BACKOFF", defaults.rate_limit_backoff_on_error)
+            ),
+            max_workers=int(
+                os.getenv("PIPELINE_MAX_WORKERS", defaults.max_workers)
+            ),
+        )
 
 
 def _call_agent_with_timeout(
@@ -70,7 +99,7 @@ def _call_agent_with_timeout(
             error=(
                 f"TimeoutError: агент не ответил за {timeout_seconds}с. "
                 f"Проверьте доступность LLM API или увеличьте "
-                f"PipelineConfig.call_timeout_seconds."
+                f"PIPELINE_CALL_TIMEOUT."
             ),
         )
 
@@ -95,7 +124,8 @@ def process_ticker(
         ticker: символ тикера. Ожидается что данные уже анонимизированы
                 на уровне БД — pipeline не выполняет анонимизацию.
         records: список записей [{year, price, dividend, yoy_change}, ...]
-        pipeline_config: настройки rate limiting и timeout
+        pipeline_config: настройки rate limiting и timeout.
+            None → читается из ENV через PipelineConfig.from_env().
         profile: UserProfile (опционально).
             Если передан — результаты фильтруются по профилю.
 
@@ -105,7 +135,7 @@ def process_ticker(
     if not records:
         return []
 
-    cfg = pipeline_config or _DEFAULT_PIPELINE_CONFIG
+    cfg = pipeline_config or PipelineConfig.from_env()
     results = []
     current_delay = cfg.rate_limit_delay_seconds
 
@@ -124,13 +154,13 @@ def process_ticker(
             context = AgentContext(
                 agent_id=f"{ticker}-{year}",
                 task="event_generation",
-                metadata={
+                metadata=make_metadata({
                     "ticker": ticker,
                     "year": year,
                     "price": record["price"],
                     "dividend": record["dividend"],
                     "yoy_change": record["yoy_change"],
-                },
+                }),
             )
 
             result: AgentResult = _call_agent_with_timeout(

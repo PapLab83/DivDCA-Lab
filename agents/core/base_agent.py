@@ -33,6 +33,7 @@ from agents.core.types import (
     LLMConfig,
     LLMProvider,
     PromptManagerProtocol,
+    make_metadata,
 )
 from agents.core.agent_lifecycle import AgentLifecycle
 from agents.core.response_parser import ResponseParser
@@ -60,6 +61,7 @@ __all__ = [
     "LLMConfig",
     "LLMProvider",
     "PromptManagerProtocol",
+    "make_metadata",
 ]
 
 
@@ -139,11 +141,13 @@ class BaseAgent(ABC):
         и ещё не присутствует в metadata.
 
         Не мутирует исходный context — возвращает новый через dataclasses.replace.
+        Новый metadata оборачивается в MappingProxyType автоматически
+        через AgentContext.__post_init__.
         """
         if self.profile is not None and "profile" not in context.metadata:
             return replace(
                 context,
-                metadata={**context.metadata, "profile": self.profile},
+                metadata=make_metadata({**context.metadata, "profile": self.profile}),
             )
         return context
 

@@ -210,10 +210,12 @@ __marimo__/
 *.xlsx
 *.xls
 *.html
-*.log
 *.jsonl
 
 collect_code.py
 
 data/
 notebooks/
+
+*.env
+!.env.example

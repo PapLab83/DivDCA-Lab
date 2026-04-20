@@ -3,10 +3,15 @@
 Точка входа: python -m mas.price_drivers_collection.run
 
 Env vars:
-    LLM_PROVIDER:  mock | openai | claude | gemini (default: mock)
-    OPENAI_API_KEY: ключ API (если provider != mock)
-    DATA_SOURCE:   mock | ... (default: mock, в будущем: db, csv, api)
-    USER_PROFILE:  conservative | moderate | aggressive (default: conservative)
+    LLM_PROVIDER:              mock | openai | claude | gemini (default: mock)
+    OPENAI_API_KEY:            ключ API (если provider != mock)
+    DATA_SOURCE:               mock | ... (default: mock, в будущем: db, csv, api)
+    USER_PROFILE:              conservative | moderate | aggressive (default: conservative)
+    PROMPTS_PATH:              путь к директории с промптами (default: agents/prompts/)
+    PIPELINE_CALL_TIMEOUT:     таймаут одного вызова агента в сек (default: 30.0)
+    PIPELINE_RATE_LIMIT_DELAY: задержка между вызовами в сек (default: 0.0)
+    PIPELINE_RATE_LIMIT_BACKOFF: множитель задержки при ошибке (default: 2.0)
+    PIPELINE_MAX_WORKERS:      потоков в ThreadPoolExecutor (default: 1)
 """
 import json
 import logging
@@ -20,6 +25,7 @@ from mas.price_drivers_collection.app_factory import (
     build_event_generation_agent,
 )
 from mas.price_drivers_collection.orchestrator import run_collection
+from mas.price_drivers_collection.pipeline import PipelineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +139,12 @@ def setup_logging() -> None:
 # ── Точка входа ───────────────────────────────────────────────────
 
 def main() -> None:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
     setup_logging()
 
     data_source = os.getenv("DATA_SOURCE", "mock")
@@ -154,14 +166,26 @@ def main() -> None:
     profile = load_profile(profile_level)
     logger.info("UserProfile: %s", profile)
 
-    # 5. Запускаем оркестрацию
+    # 5. PipelineConfig — читаем из ENV
+    pipeline_config = PipelineConfig.from_env()
+    logger.info(
+        "PipelineConfig: timeout=%.1fs, rate_limit_delay=%.1fs, "
+        "backoff=%.1f, max_workers=%d",
+        pipeline_config.call_timeout_seconds,
+        pipeline_config.rate_limit_delay_seconds,
+        pipeline_config.rate_limit_backoff_on_error,
+        pipeline_config.max_workers,
+    )
+
+    # 6. Запускаем оркестрацию
     results = run_collection(
         agent=agent,
         tickers_data=tickers_data,
         profile=profile,
+        pipeline_config=pipeline_config,
     )
 
-    # 6. Выводим результаты
+    # 7. Выводим результаты
     format_results(results)
 
 
