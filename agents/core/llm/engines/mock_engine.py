@@ -35,9 +35,11 @@ _MOCK_RESPONSES: dict[str, dict] = {
         "recommendation": "hold",
         "confidence": 0.65,
     },
-    # Fallback — используется если задача не распознана
+    # Fallback — используется если задача не распознана.
+    # Содержит reason_short и confidence для совместимости с тестами LLMAdapter.
     "_default": {
-        "result": "mock_default_response",
+        "reason_short": "mock_default_response",
+        "confidence": 1.0,
         "note": "MockEngine: task not recognized, using default response",
     },
 }

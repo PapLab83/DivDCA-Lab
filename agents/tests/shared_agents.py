@@ -12,20 +12,16 @@ class AlwaysSuccessAgent(BaseAgent):
     def _execute_internal(self, context: AgentContext) -> AgentResult:
         return AgentResult(
             success=True,
-            data={
-                "reason_short": "Test reason",
-                "reason_long": "This is a test reason for testing",
-                "confidence": 0.95,
-            },
+            data={"message": "ok"},
             prompt_version="test-1.0",
         )
 
 
 class AlwaysFailAgent(BaseAgent):
-    """Агент, который всегда падает с исключением."""
+    """Агент, который всегда падает с ValueError."""
 
     def _execute_internal(self, context: AgentContext) -> AgentResult:
-        raise RuntimeError("Simulated LLM failure")
+        raise ValueError("Тестовая ошибка")
 
 
 class PartialFailAgent(BaseAgent):
