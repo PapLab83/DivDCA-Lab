@@ -38,7 +38,6 @@ _MOCK_RESPONSES: dict[str, dict] = {
     # Fallback — используется если задача не распознана
     "_default": {
         "result": "mock_default_response",
-        "confidence": 0.5,
         "note": "MockEngine: task not recognized, using default response",
     },
 }
