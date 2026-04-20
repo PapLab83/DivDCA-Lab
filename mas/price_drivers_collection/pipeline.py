@@ -1,10 +1,6 @@
 """
 Pipeline для обработки одного тикера за период.
 Вызывает агента для каждого года, собирает результаты.
-ThreadPoolExecutor зафиксирован как tech debt (TD-001):
-    Текущая реализация создаёт executor на каждый вызов агента.
-    При масштабировании (>100 тикеров) заменить на shared executor
-    с timeout через concurrent.futures.wait на уровне оркестратора.
 """
 import logging
 import time
@@ -29,10 +25,12 @@ class PipelineConfig:
         call_timeout_seconds: максимальное время ожидания одного вызова агента.
         rate_limit_delay_seconds: задержка между вызовами агента.
         rate_limit_backoff_on_error: множитель задержки при ошибке.
+        max_workers: количество потоков в ThreadPoolExecutor.
     """
     call_timeout_seconds: float = 30.0
     rate_limit_delay_seconds: float = 0.0
     rate_limit_backoff_on_error: float = 2.0
+    max_workers: int = 1
 
 
 _DEFAULT_PIPELINE_CONFIG = PipelineConfig()
@@ -42,34 +40,38 @@ def _call_agent_with_timeout(
     agent,
     context: AgentContext,
     timeout_seconds: float,
+    executor: ThreadPoolExecutor,
 ) -> AgentResult:
     """
     Вызывает агента с ограничением по времени.
 
     Если агент не ответил за timeout_seconds — возвращает AgentResult с ошибкой.
 
-    TD-001: ThreadPoolExecutor создаётся на каждый вызов.
-    При масштабировании заменить на shared executor в process_ticker.
+    Args:
+        agent: экземпляр агента
+        context: контекст вызова
+        timeout_seconds: максимальное время ожидания
+        executor: разделяемый ThreadPoolExecutor, созданный в process_ticker.
+            Передаётся снаружи — функция не создаёт и не закрывает executor.
     """
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(agent.execute, context)
-        try:
-            return future.result(timeout=timeout_seconds)
-        except FuturesTimeoutError:
-            logger.error(
-                "Timeout (%ss) для агента %s/%s",
-                timeout_seconds,
-                context.metadata.get("ticker", "?"),
-                context.metadata.get("year", "?"),
-            )
-            return AgentResult(
-                success=False,
-                error=(
-                    f"TimeoutError: агент не ответил за {timeout_seconds}с. "
-                    f"Проверьте доступность LLM API или увеличьте "
-                    f"PipelineConfig.call_timeout_seconds."
-                ),
-            )
+    future = executor.submit(agent.execute, context)
+    try:
+        return future.result(timeout=timeout_seconds)
+    except FuturesTimeoutError:
+        logger.error(
+            "Timeout (%ss) для агента %s/%s",
+            timeout_seconds,
+            context.metadata.get("ticker", "?"),
+            context.metadata.get("year", "?"),
+        )
+        return AgentResult(
+            success=False,
+            error=(
+                f"TimeoutError: агент не ответил за {timeout_seconds}с. "
+                f"Проверьте доступность LLM API или увеличьте "
+                f"PipelineConfig.call_timeout_seconds."
+            ),
+        )
 
 
 def process_ticker(
@@ -106,68 +108,70 @@ def process_ticker(
     results = []
     current_delay = cfg.rate_limit_delay_seconds
 
-    for i, record in enumerate(records):
-        year = record["year"]
-        logger.info("Processing %s / %d", ticker, year)
+    with ThreadPoolExecutor(max_workers=cfg.max_workers) as executor:
+        for i, record in enumerate(records):
+            year = record["year"]
+            logger.info("Processing %s / %d", ticker, year)
 
-        if i > 0 and current_delay > 0:
-            logger.debug(
-                "Rate limit delay: %.2fs перед %s/%d",
-                current_delay, ticker, year,
+            if i > 0 and current_delay > 0:
+                logger.debug(
+                    "Rate limit delay: %.2fs перед %s/%d",
+                    current_delay, ticker, year,
+                )
+                time.sleep(current_delay)
+
+            context = AgentContext(
+                agent_id=f"{ticker}-{year}",
+                task="event_generation",
+                metadata={
+                    "ticker": ticker,
+                    "year": year,
+                    "price": record["price"],
+                    "dividend": record["dividend"],
+                    "yoy_change": record["yoy_change"],
+                },
             )
-            time.sleep(current_delay)
 
-        context = AgentContext(
-            agent_id=f"{ticker}-{year}",
-            task="event_generation",
-            metadata={
+            result: AgentResult = _call_agent_with_timeout(
+                agent=agent,
+                context=context,
+                timeout_seconds=cfg.call_timeout_seconds,
+                executor=executor,
+            )
+
+            results.append({
                 "ticker": ticker,
                 "year": year,
                 "price": record["price"],
                 "dividend": record["dividend"],
-                "yoy_change": record["yoy_change"],
-            },
-        )
+                "success": result.success,
+                "data": result.data,
+                "error": result.error,
+                "duration_ms": result.duration_ms,
+                "prompt_version": result.prompt_version,
+            })
 
-        result: AgentResult = _call_agent_with_timeout(
-            agent=agent,
-            context=context,
-            timeout_seconds=cfg.call_timeout_seconds,
-        )
-
-        results.append({
-            "ticker": ticker,
-            "year": year,
-            "price": record["price"],
-            "dividend": record["dividend"],
-            "success": result.success,
-            "data": result.data,
-            "error": result.error,
-            "duration_ms": result.duration_ms,
-            "prompt_version": result.prompt_version,
-        })
-
-        if result.success:
-            current_delay = cfg.rate_limit_delay_seconds
-            logger.info(
-                "  ✓ %s/%d: %s (confidence=%.2f, %dms)",
-                ticker, year,
-                result.data.get("reason_short", "?"),
-                result.data.get("confidence", 0),
-                result.duration_ms or 0,
-            )
-        else:
-            if cfg.rate_limit_delay_seconds > 0:
-                current_delay = min(
-                    current_delay * cfg.rate_limit_backoff_on_error,
-                    60.0,
-                )
-                logger.warning(
-                    "  ✗ %s/%d: %s (следующая задержка: %.2fs)",
-                    ticker, year, result.error, current_delay,
+            if result.success:
+                current_delay = cfg.rate_limit_delay_seconds
+                logger.info(
+                    "  ✓ %s/%d: %s (confidence=%.2f, %dms)",
+                    ticker, year,
+                    result.data.get("reason_short", "?"),
+                    result.data.get("confidence", 0),
+                    result.duration_ms or 0,
                 )
             else:
-                logger.warning("  ✗ %s/%d: %s", ticker, year, result.error)
+                if cfg.rate_limit_delay_seconds > 0:
+                    current_delay = min(
+                        current_delay * cfg.rate_limit_backoff_on_error,
+                        60.0,
+                    )
+                    logger.warning(
+                        "  ✗ %s/%d: %s (следующая задержка: %.2fs)",
+                        ticker, year, result.error, current_delay,
+                    )
+                else:
+                    logger.warning("  ✗ %s/%d: %s", ticker, year, result.error)
 
     # Фильтрация по профилю если передан
     if profile is not None:
