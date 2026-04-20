@@ -34,6 +34,9 @@ from agents.core.types import (
     LLMProvider,
     PromptManagerProtocol,
 )
+from agents.core.agent_lifecycle import AgentLifecycle
+from agents.core.response_parser import ResponseParser
+from agents.core.error_mapper import ErrorMapper
 
 if TYPE_CHECKING:
     from agents.core.profiles.profile import UserProfile
@@ -100,13 +103,6 @@ class BaseAgent(ABC):
         self.llm_adapter = llm_adapter
         self.prompt_manager = prompt_manager
         self.profile = profile
-
-        # Импорты на уровне модуля теперь безопасны:
-        # agent_lifecycle/response_parser/error_mapper импортируют из types.py,
-        # а не из base_agent.py — цикл устранён.
-        from agents.core.agent_lifecycle import AgentLifecycle
-        from agents.core.response_parser import ResponseParser
-        from agents.core.error_mapper import ErrorMapper
 
         self._lifecycle = AgentLifecycle(
             agent_class_name=self.__class__.__name__,
