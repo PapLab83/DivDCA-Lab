@@ -2,7 +2,7 @@
 Агент генерации событий — объясняет причины изменения дивидендов.
 """
 import logging
-from typing import Optional
+from typing import Optional, Set
 
 from agents.core.base_agent import (
     AgentContext,
@@ -55,7 +55,5 @@ class EventGenerationAgent(BaseAgent):
             llm_response=response,
         )
 
-    def _validate_result(self, result: dict) -> bool:
-        """Проверяет наличие обязательных полей."""
-        required = {"reason_short", "reason_long", "confidence"}
-        return required.issubset(result.keys())
+    def required_fields(self) -> Set[str]:
+        return {"reason_short", "reason_long", "confidence"}

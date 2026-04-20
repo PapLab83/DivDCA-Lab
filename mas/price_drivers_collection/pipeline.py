@@ -58,6 +58,7 @@ def _call_agent_with_timeout(
     try:
         return future.result(timeout=timeout_seconds)
     except FuturesTimeoutError:
+        future.cancel()
         logger.error(
             "Timeout (%ss) для агента %s/%s",
             timeout_seconds,

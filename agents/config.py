@@ -89,15 +89,17 @@ def load_api_config(yaml_overrides: Optional[dict] = None) -> ApiConfig:
     """
     yaml_api = yaml_overrides.get("api", {}) if yaml_overrides else {}
 
-    api_key = os.getenv("API_KEY", "")
-    if not api_key:
-        api_key = os.getenv("OPENAI_API_KEY", "")
-    if not api_key:
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        api_key = os.getenv("GOOGLE_API_KEY", "")
-    if not api_key:
-        api_key = yaml_api.get("api_key", "")
+    _API_KEY_ENV_PRIORITY = [
+        "API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+    ]
+
+    api_key = next(
+        (os.getenv(var) for var in _API_KEY_ENV_PRIORITY if os.getenv(var)),
+        yaml_api.get("api_key", ""),
+    )
 
     if not api_key:
         logger.warning("API ключ не найден в переменных окружения и YAML-конфиге")

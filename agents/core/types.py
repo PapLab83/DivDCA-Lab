@@ -116,8 +116,9 @@ class AgentConfig:
 
     def __post_init__(self) -> None:
         if self.mode != AgentMode.API:
-            raise NotImplementedError(
-                f"Режим {self.mode} ещё не реализован. Доступен только: {AgentMode.API}"
+            raise ValueError(
+                f"Режим {self.mode!r} не поддерживается. "
+                f"Доступные: {[m.value for m in AgentMode]}"
             )
 
 

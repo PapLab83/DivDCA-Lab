@@ -13,13 +13,14 @@ import os
 import sys
 from typing import Any, Dict, List, Callable
 
-from agents.config import build_container
 from agents.core.profiles import AggressivenessLevel, UserProfile
-from agents.tasks.event_generation.agent import EventGenerationAgent
+from mas.price_drivers_collection.app_factory import build_app_container
 from mas.price_drivers_collection.orchestrator import run_collection
 
 logger = logging.getLogger(__name__)
 
+
+# ── Загрузка данных ───────────────────────────────────────────────
 
 def load_data(source: str) -> List[Dict[str, Any]]:
     """
@@ -44,6 +45,8 @@ def load_data(source: str) -> List[Dict[str, Any]]:
         f"Доступные: mock"
     )
 
+
+# ── Загрузка профиля ──────────────────────────────────────────────
 
 def load_profile(level: str) -> UserProfile:
     """
@@ -75,53 +78,18 @@ def load_profile(level: str) -> UserProfile:
     return factory()
 
 
+# ── Форматирование результатов ────────────────────────────────────
 
-def setup_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        stream=sys.stdout,
-    )
-    logging.getLogger("agents.core.llm").setLevel(logging.WARNING)
-    logging.getLogger("agents.core.agent_factory").setLevel(logging.WARNING)
-    logging.getLogger("agents.core.agent_registry").setLevel(logging.WARNING)
+def format_results(results: Dict[str, List[Dict[str, Any]]]) -> None:
+    """
+    Выводит результаты оркестрации в лог.
 
+    Отделена от main() чтобы логику вывода можно было
+    тестировать и переиспользовать независимо.
 
-def main() -> None:
-    setup_logging()
-
-    data_source = os.getenv("DATA_SOURCE", "mock")
-    logger.info("DATA_SOURCE=%s", data_source)
-
-    # 1. Собираем контейнер
-    container = build_container()
-    logger.info(
-        "Контейнер: provider=%s, model=%s",
-        container.config.llm_config.provider,
-        container.config.llm_config.model,
-    )
-
-    # 2. Регистрируем агента
-    container.factory.register("event_generation", EventGenerationAgent)
-    logger.info("Агенты: %s", container.factory.list_agents())
-
-    # 3. Загружаем данные
-    tickers_data = load_data(data_source)
-
-    # 4. UserProfile — читаем из ENV, fallback → conservative.
-    #    Влияет на фильтрацию результатов по порогам confidence и dividend_yield.
-    profile_level = os.getenv("USER_PROFILE", AggressivenessLevel.CONSERVATIVE)
-    profile = load_profile(profile_level)
-    logger.info("UserProfile: %s", profile)
-
-    # 5. Запускаем оркестрацию
-    results = run_collection(
-        container,
-        tickers_data,
-        profile=profile,
-    )
-
-    # 6. Выводим результаты
+    Args:
+        results: {ticker: [результаты по годам]}
+    """
     logger.info("=" * 60)
     logger.info("РЕЗУЛЬТАТЫ")
     logger.info("=" * 60)
@@ -146,6 +114,49 @@ def main() -> None:
         "FULL JSON:\n%s",
         json.dumps(results, indent=2, ensure_ascii=False),
     )
+
+
+# ── Настройка логирования ─────────────────────────────────────────
+
+def setup_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        stream=sys.stdout,
+    )
+    logging.getLogger("agents.core.llm").setLevel(logging.WARNING)
+    logging.getLogger("agents.core.agent_factory").setLevel(logging.WARNING)
+    logging.getLogger("agents.core.agent_registry").setLevel(logging.WARNING)
+
+
+# ── Точка входа ───────────────────────────────────────────────────
+
+def main() -> None:
+    setup_logging()
+
+    data_source = os.getenv("DATA_SOURCE", "mock")
+    logger.info("DATA_SOURCE=%s", data_source)
+
+    # 1. Собираем контейнер и регистрируем агентов
+    container = build_app_container()
+
+    # 2. Загружаем данные
+    tickers_data = load_data(data_source)
+
+    # 3. UserProfile — читаем из ENV, fallback → conservative
+    profile_level = os.getenv("USER_PROFILE", AggressivenessLevel.CONSERVATIVE)
+    profile = load_profile(profile_level)
+    logger.info("UserProfile: %s", profile)
+
+    # 4. Запускаем оркестрацию
+    results = run_collection(
+        container,
+        tickers_data,
+        profile=profile,
+    )
+
+    # 5. Выводим результаты
+    format_results(results)
 
 
 if __name__ == "__main__":
