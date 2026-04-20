@@ -102,7 +102,7 @@ agents/
 │   ├── agent_factory.py           # Фабрика (singleton, thread-safe)
 │   ├── agent_registry.py          # Реестр метаданных агентов
 │   ├── agent_validator.py         # Валидация агент ↔ конфиг
-│   ├── prompt_manager.py          # [TODO] Шаблоны промптов
+│   ├── prompt_manager.py          # Шаблоны промптов (сборка из секций, YAML)
 │   ├── llm/                       # LLM-слой
 │   │   ├── adapter.py             # Единый интерфейс + cache + retry
 │   │   ├── exceptions.py          # Иерархия ошибок
@@ -161,6 +161,4 @@ agents/
 | Профили агрессивности                                    |      ⬜     |
 | Orchestrator                                             |      ⬜     |
 | REST API                                                 |      ⬜     |
-
----
-
+```
