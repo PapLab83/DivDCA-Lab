@@ -114,13 +114,6 @@ class AgentConfig:
     api_config: ApiConfig = field(default_factory=ApiConfig)
     cache_enabled: bool = True
 
-    def __post_init__(self) -> None:
-        if self.mode != AgentMode.API:
-            raise ValueError(
-                f"Режим {self.mode!r} не поддерживается. "
-                f"Доступные: {[m.value for m in AgentMode]}"
-            )
-
 
 # ─────────────────────────── Context ──────────────────────────────
 
