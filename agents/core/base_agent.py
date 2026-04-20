@@ -6,6 +6,9 @@
     ResponseParser  — парсинг и валидация ответов LLM
     AgentLifecycle  — жизненный цикл (таймер, финализация, логирование)
     ErrorMapper     — маппинг исключений в AgentResult
+
+Shared типы (Protocol'ы, Config, Context, Result, Enums) вынесены в types.py
+для устранения циклических импортов.
 """
 from __future__ import annotations
 
@@ -13,12 +16,24 @@ import asyncio
 import logging
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
-from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol, Set, Tuple, runtime_checkable
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Tuple
 
-from agents.core.llm.exceptions import LLMParseError
+# Все shared типы импортируются из types.py — нет циклов
+from agents.core.types import (
+    AgentConfig,
+    AgentContext,
+    AgentMode,
+    AgentResult,
+    ApiConfig,
+    AsyncLLMAdapterProtocol,
+    CacheProtocol,
+    FinancialAgentContext,
+    LLMAdapterProtocol,
+    LLMConfig,
+    LLMProvider,
+    PromptManagerProtocol,
+)
 
 if TYPE_CHECKING:
     from agents.core.profiles.profile import UserProfile
@@ -26,141 +41,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────── Protocols ────────────────────────────
+# Re-export всех типов для обратной совместимости.
+# Код который импортирует из base_agent продолжает работать без изменений.
+__all__ = [
+    "AgentConfig",
+    "AgentContext",
+    "AgentMode",
+    "AgentResult",
+    "ApiConfig",
+    "AsyncLLMAdapterProtocol",
+    "BaseAgent",
+    "CacheProtocol",
+    "FinancialAgentContext",
+    "LLMAdapterProtocol",
+    "LLMConfig",
+    "LLMProvider",
+    "PromptManagerProtocol",
+]
 
-@runtime_checkable
-class LLMAdapterProtocol(Protocol):
-    """Контракт для синхронных LLM адаптеров"""
-    def call(self, prompt: str) -> str: ...
-
-
-@runtime_checkable
-class AsyncLLMAdapterProtocol(Protocol):
-    """Контракт для асинхронных LLM адаптеров."""
-    async def call(self, prompt: str) -> str: ...
-
-
-@runtime_checkable
-class PromptManagerProtocol(Protocol):
-    """Контракт для менеджера промптов"""
-    def get_prompt(self, task: str, **variables: Any) -> Tuple[str, str]: ...
-
-
-@runtime_checkable
-class CacheProtocol(Protocol):
-    """Контракт для кэша"""
-    def get(self, key: str) -> Optional[str]: ...
-    def set(self, key: str, value: str) -> None: ...
-
-
-# ─────────────────────────── Enums ────────────────────────────────
-
-class AgentMode(StrEnum):
-    """Режимы работы агента"""
-    API = "api"
-
-
-class LLMProvider(StrEnum):
-    """Поддерживаемые LLM провайдеры"""
-    OPENAI = "openai"
-    CLAUDE = "claude"
-    GEMINI = "gemini"
-    MOCK = "mock"
-
-
-# ─────────────────────────── Configs ──────────────────────────────
-
-@dataclass
-class LLMConfig:
-    """Конфигурация LLM"""
-    provider: LLMProvider = LLMProvider.OPENAI
-    model: str = "gpt-4"
-    temperature: float = 0.7
-    max_tokens: int = 1000
-    timeout_seconds: int = 30
-
-    def __post_init__(self) -> None:
-        if not 0.0 <= self.temperature <= 2.0:
-            raise ValueError(
-                f"temperature должна быть в диапазоне [0, 2], получено: {self.temperature}"
-            )
-        if self.max_tokens <= 0:
-            raise ValueError(
-                f"max_tokens должно быть положительным, получено: {self.max_tokens}"
-            )
-
-
-@dataclass
-class ApiConfig:
-    """Конфигурация API подключения"""
-    base_url: str = ""
-    api_key: str = ""
-    retries: int = 3
-    retry_delay_seconds: float = 1.0
-    timeout_seconds: int = 30
-
-    def __repr__(self) -> str:
-        if len(self.api_key) > 4:
-            masked = self.api_key[:4] + "****"
-        elif self.api_key:
-            masked = "****"
-        else:
-            masked = "<empty>"
-        return (
-            f"ApiConfig(base_url={self.base_url!r}, api_key={masked!r}, "
-            f"retries={self.retries}, timeout_seconds={self.timeout_seconds})"
-        )
-
-
-@dataclass
-class AgentConfig:
-    """Конфигурация агента"""
-    mode: AgentMode = AgentMode.API
-    llm_config: LLMConfig = field(default_factory=LLMConfig)
-    api_config: ApiConfig = field(default_factory=ApiConfig)
-    cache_enabled: bool = True
-
-    def __post_init__(self) -> None:
-        if self.mode != AgentMode.API:
-            raise NotImplementedError(
-                f"Режим {self.mode} ещё не реализован. Доступен только: {AgentMode.API}"
-            )
-
-
-# ─────────────────────────── Context ──────────────────────────────
-
-@dataclass
-class AgentContext:
-    """Контекст выполнения агента (иммутабельный по соглашению)"""
-    agent_id: str
-    task: str
-    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class FinancialAgentContext(AgentContext):
-    """Контекст для финансовых агентов"""
-    ticker: str = ""
-    year: Optional[int] = None
-
-
-# ─────────────────────────── Result ───────────────────────────────
-
-@dataclass(frozen=True)
-class AgentResult:
-    """Результат работы агента"""
-    success: bool
-    data: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    prompt_version: Optional[str] = None
-    llm_response: Optional[str] = None
-    tokens_used: Optional[int] = None
-    duration_ms: Optional[int] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-# ─────────────────────────── BaseAgent ────────────────────────────
 
 class BaseAgent(ABC):
     """
@@ -203,9 +101,9 @@ class BaseAgent(ABC):
         self.prompt_manager = prompt_manager
         self.profile = profile
 
-        # ── Композиционные компоненты ──���───────────────────────────
-        # Импорт внутри __init__ исключает циклические зависимости на уровне модуля:
-        # base_agent ← agent_lifecycle/response_parser/error_mapper ← base_agent
+        # Импорты на уровне модуля теперь безопасны:
+        # agent_lifecycle/response_parser/error_mapper импортируют из types.py,
+        # а не из base_agent.py — цикл устранён.
         from agents.core.agent_lifecycle import AgentLifecycle
         from agents.core.response_parser import ResponseParser
         from agents.core.error_mapper import ErrorMapper
@@ -245,12 +143,6 @@ class BaseAgent(ABC):
         и ещё не присутствует в metadata.
 
         Не мутирует исходный context — возвращает новый через dataclasses.replace.
-
-        Args:
-            context: исходный контекст
-
-        Returns:
-            Контекст с profile в metadata (или исходный если профиль не задан)
         """
         if self.profile is not None and "profile" not in context.metadata:
             return replace(
@@ -361,8 +253,6 @@ class BaseAgent(ABC):
     def _parse_response(self, response: str) -> Dict[str, Any]:
         """
         Парсинг ответа от LLM через ResponseParser.
-
-        Делегирует в self._parser.parse().
         Оставлен для обратной совместимости с наследниками.
         """
         return self._parser.parse(response)
@@ -370,8 +260,6 @@ class BaseAgent(ABC):
     def _validate_result(self, result: Dict[str, Any]) -> bool:
         """
         Валидация распарсенного результата.
-
-        Делегирует в self._parser.validate_only().
         Переопределите required_fields() вместо этого метода.
         """
         return self._parser.validate_only(result)
@@ -379,8 +267,6 @@ class BaseAgent(ABC):
     def _handle_error(self, error: Exception) -> AgentResult:
         """
         Обработка ошибок.
-
-        Делегирует в self._error_mapper.handle().
         Переопределите для кастомного маппинга конкретных исключений.
         """
         return self._error_mapper.handle(error, self.__class__.__name__)

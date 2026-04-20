@@ -1,6 +1,10 @@
 """
 Pipeline для обработки одного тикера за период.
 Вызывает агента для каждого года, собирает результаты.
+ThreadPoolExecutor зафиксирован как tech debt (TD-001):
+    Текущая реализация создаёт executor на каждый вызов агента.
+    При масштабировании (>100 тикеров) заменить на shared executor
+    с timeout через concurrent.futures.wait на уровне оркестратора.
 """
 import logging
 import time
@@ -20,7 +24,7 @@ class PipelineConfig:
     Настройки pipeline обработки тикеров.
 
     Attributes:
-        call_timeout_seconds: максимальное время ожидания одного вызова аген��а.
+        call_timeout_seconds: максимальное время ожидания одного вызова агента.
         rate_limit_delay_seconds: задержка между вызовами агента.
         rate_limit_backoff_on_error: множитель задержки при ошибке.
     """
@@ -41,6 +45,9 @@ def _call_agent_with_timeout(
     Вызывает агента с ограничением по времени.
 
     Если агент не ответил за timeout_seconds — возвращает AgentResult с ошибкой.
+
+    TD-001: ThreadPoolExecutor создаётся на каждый вызов.
+    При масштабировании заменить на shared executor в process_ticker.
     """
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(agent.execute, context)
@@ -68,7 +75,6 @@ def process_ticker(
     ticker: str,
     records: List[Dict[str, Any]],
     pipeline_config: Optional[PipelineConfig] = None,
-    anonymizer=None,
     profile=None,
 ) -> List[Dict[str, Any]]:
     """
@@ -76,35 +82,23 @@ def process_ticker(
 
     Args:
         container: DI-контейнер с настроенным агентом
-        ticker: символ тикера (реальный — анонимизируется внутри если передан anonymizer)
+        ticker: символ тикера. Ожидается что данные уже анонимизированы
+                на уровне БД — pipeline не выполняет анонимизацию.
         records: список записей [{year, price, dividend, yoy_change}, ...]
         pipeline_config: настройки rate limiting и timeout
-        anonymizer: экземпляр Anonymizer (опционально).
-            Если передан — тикер анонимизируется перед передачей в LLM.
         profile: UserProfile (опционально).
             Если передан — результаты фильтруются по профилю.
 
     Returns:
         Список результатов по каждому году.
-        Поле 'ticker' содержит реальный тикер (деанонимизация не нужна —
-        мы сами знаем реальный тикер на этом уровне).
     """
     if not records:
         return []
 
     cfg = pipeline_config or _DEFAULT_PIPELINE_CONFIG
-
-    # Анонимизация тикера перед передачей в LLM
-    if anonymizer is not None:
-        llm_ticker = anonymizer.anonymize_ticker(ticker)
-        logger.debug("Anonymizer: %r → %r", ticker, llm_ticker)
-    else:
-        llm_ticker = ticker
-
     agent = container.factory.create_agent(
         agent_type="event_generation",
         config=container.config,
-        skip_validation=True,
     )
 
     results = []
@@ -125,8 +119,7 @@ def process_ticker(
             agent_id=f"{ticker}-{year}",
             task="event_generation",
             metadata={
-                # LLM видит анонимный тикер
-                "ticker": llm_ticker,
+                "ticker": ticker,
                 "year": year,
                 "price": record["price"],
                 "dividend": record["dividend"],
@@ -140,7 +133,6 @@ def process_ticker(
             timeout_seconds=cfg.call_timeout_seconds,
         )
 
-        # Сохраняем реальный тикер в результате (не анонимный)
         results.append({
             "ticker": ticker,
             "year": year,

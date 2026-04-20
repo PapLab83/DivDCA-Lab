@@ -60,7 +60,6 @@ def run_collection(
             container,
             ticker,
             records,
-            anonymizer=anonymizer,
             profile=profile,
         )
         all_results[ticker] = results

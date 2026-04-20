@@ -14,7 +14,6 @@ import sys
 from typing import Any, Dict, List
 
 from agents.config import build_container
-from agents.core.anonymizer import Anonymizer
 from agents.core.profiles import AggressivenessLevel, UserProfile
 from agents.tasks.event_generation.agent import EventGenerationAgent
 from mas.price_drivers_collection.orchestrator import run_collection
@@ -108,30 +107,20 @@ def main() -> None:
     # 3. Загружаем данные
     tickers_data = load_data(data_source)
 
-    # 4. Anonymizer — анонимизируем тикеры перед передачей в LLM.
-    #    Один экземпляр на сессию: карта real ↔ anonymous сохраняется
-    #    между тикерами внутри одного запуска.
-    anonymizer = Anonymizer()
-    logger.info(
-        "Anonymizer создан: стратегия=%s",
-        anonymizer._strategy.__class__.__name__,
-    )
-
-    # 5. UserProfile — читаем из ENV, fallback → conservative.
+    # 4. UserProfile — читаем из ENV, fallback → conservative.
     #    Влияет на фильтрацию результатов по порогам confidence и dividend_yield.
     profile_level = os.getenv("USER_PROFILE", AggressivenessLevel.CONSERVATIVE)
     profile = load_profile(profile_level)
     logger.info("UserProfile: %s", profile)
 
-    # 6. Запускаем оркестрацию
+    # 5. Запускаем оркестрацию
     results = run_collection(
         container,
         tickers_data,
-        anonymizer=anonymizer,
         profile=profile,
     )
 
-    # 7. Выводим результаты
+    # 6. Выводим результаты
     logger.info("=" * 60)
     logger.info("РЕЗУЛЬТАТЫ")
     logger.info("=" * 60)

@@ -25,7 +25,7 @@ ErrorMapper — маппинг исключений в AgentResult.
 import logging
 from typing import Callable, Dict, Optional, Type
 
-from agents.core.base_agent import AgentResult
+from agents.core.types import AgentResult
 
 logger = logging.getLogger(__name__)
 

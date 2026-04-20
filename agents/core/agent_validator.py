@@ -108,17 +108,21 @@ class AgentValidator:
             metadata: AgentMetadata,
             config: AgentConfig,
     ) -> List[ValidationError]:
-        """Проверка совместимости провайдера."""
+        """
+        Проверка совместимости провайдера.
+
+        Семантика supported_providers:
+            None  → поле не задано, проверка пропускается (любой разрешён)
+            []    → ограничений нет, любой провайдер разрешён
+            [...] → проверяем что провайдер из списка
+        """
+        # None → проверка не задана
         if metadata.supported_providers is None:
             return []
 
+        # [] → ограничений нет, любой провайдер разрешён
         if not metadata.supported_providers:
-            return [
-                ValidationError(
-                    code="EMPTY_PROVIDERS_LIST",
-                    message=f"Agent '{agent_type}': supported_providers list is empty",
-                )
-            ]
+            return []
 
         raw_provider = config.llm_config.provider
         if raw_provider is None:
@@ -129,7 +133,6 @@ class AgentValidator:
                 )
             ]
 
-        # S5: нормализация через ValidationError, не TypeError
         normalized = self._normalize_provider(raw_provider)
         if normalized is None:
             return [
@@ -159,9 +162,14 @@ class AgentValidator:
         """
         Приводит провайдера к строке.
 
+        LLMProvider наследует StrEnum который наследует str,
+        поэтому isinstance(LLMProvider.OPENAI, str) → True.
+        Явное str() гарантирует что возвращается чистая строка,
+        а не объект LLMProvider — для надёжного сравнения с List[str].
+
         Возвращает строку если тип корректный,
-        None если тип неожиданный (вместо TypeError — контракт не нарушается).
+        None если тип неожиданный.
         """
         if isinstance(raw_provider, str):
-            return raw_provider
+            return str(raw_provider)
         return None

@@ -25,7 +25,7 @@ import time
 from dataclasses import replace
 from typing import Any, Callable, Dict, Optional
 
-from agents.core.base_agent import AgentContext, AgentResult
+from agents.core.types import AgentContext, AgentResult
 
 logger = logging.getLogger(__name__)
 
