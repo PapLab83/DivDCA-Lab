@@ -32,7 +32,7 @@ import logging
 from typing import Callable, Dict, Optional, Type
 from dataclasses import replace
 
-from agents.core.types import AgentResult
+from agents.core.types import AgentResult, make_metadata, merge_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +83,11 @@ class ErrorMapper:
             agent_class_name: имя агента для метаданных и логов
 
         Returns:
-            AgentResult(success=False, error=..., metadata={agent_class: ...})
+            AgentResult(success=False, error=..., metadata=MappingProxyType({agent_class: ...}))
         """
         try:
             result = self._dispatch(error)
-            # Гарантируем agent_class в metadata
-            metadata = {**result.metadata, "agent_class": agent_class_name}
+            metadata = merge_metadata(result.metadata, {"agent_class": agent_class_name})
             return replace(result, metadata=metadata)
         except Exception as inner:
             logger.critical(
@@ -99,7 +98,7 @@ class ErrorMapper:
             return AgentResult(
                 success=False,
                 error=f"Critical: {inner.__class__.__name__}: {inner}",
-                metadata={"agent_class": agent_class_name},
+                metadata=make_metadata({"agent_class": agent_class_name}),
             )
 
     def register(

@@ -30,7 +30,7 @@ import time
 from dataclasses import replace
 from typing import Any, Callable, Dict, Optional
 
-from agents.core.types import AgentContext, AgentResult
+from agents.core.types import AgentContext, AgentResult, merge_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -119,15 +119,16 @@ class AgentLifecycle:
             extra_metadata: дополнительные метаданные для слияния
 
         Returns:
-            Новый AgentResult с заполненными duration_ms и metadata
+            Новый AgentResult с заполненными duration_ms и metadata.
+            metadata — иммутабельный MappingProxyType.
         """
         duration_ms = int((time.monotonic() - start_time) * 1000)
 
-        merged_metadata = {
-            **result.metadata,
-            "agent_class": self._agent_class_name,
-            **(extra_metadata or {}),
-        }
+        merged_metadata = merge_metadata(
+            result.metadata,
+            {"agent_class": self._agent_class_name},
+            extra_metadata,
+        )
 
         finalized = replace(
             result,

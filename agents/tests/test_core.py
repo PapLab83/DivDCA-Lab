@@ -563,3 +563,23 @@ class TestConfigs:
         result = AgentResult(success=True)
         with pytest.raises(AttributeError):
             result.success = False  # type: ignore
+
+    def test_agent_result_metadata_is_immutable(self):
+        """metadata в AgentResult — MappingProxyType, попытка записи бросает TypeError."""
+        result = AgentResult(success=True, metadata={"agent_class": "TestAgent"})
+        assert result.metadata["agent_class"] == "TestAgent"
+        with pytest.raises(TypeError):
+            result.metadata["agent_class"] = "OtherAgent"  # type: ignore
+
+    def test_agent_result_metadata_dict_auto_wrapped(self):
+        """dict автоматически оборачивается в MappingProxyType через __post_init__."""
+        from types import MappingProxyType
+        result = AgentResult(success=True, metadata={"key": "val"})
+        assert isinstance(result.metadata, MappingProxyType)
+
+    def test_agent_result_metadata_default_is_immutable(self):
+        """Дефолтная metadata — пустой MappingProxyType, не dict."""
+        from types import MappingProxyType
+        result = AgentResult(success=True)
+        assert isinstance(result.metadata, MappingProxyType)
+        assert len(result.metadata) == 0

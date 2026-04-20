@@ -21,6 +21,10 @@ from agents.core.base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 
+# Поля AgentMetadata которые не должны загружаться из YAML.
+# agent_class — runtime объект, задаётся через bind_class(), не через конфиг.
+_YAML_EXCLUDED_FIELDS = frozenset({"agent_class"})
+
 
 @dataclass
 class AgentMetadata:
@@ -86,7 +90,9 @@ class AgentRegistry:
             self._agents.update(defaults)
 
     def load_from_file(self, path: Path) -> None:
-        """Загружает метаданные агентов из YAML-файла."""
+        """
+        Загружает метаданные агентов из YAML-файла.
+        """
         try:
             import yaml
         except ImportError:
@@ -99,8 +105,17 @@ class AgentRegistry:
             raise ValueError(f"Ожидался dict в {path}, получен {type(data).__name__}")
         with self._lock:
             for key, meta in data.items():
-                # agent_class не загружается из YAML — только метаданные
-                self._agents[key] = AgentMetadata(**meta)
+                if not isinstance(meta, dict):
+                    logger.warning(
+                        "Пропущен невалидный агент '%s' в %s: ожидался dict, получен %s",
+                        key, path, type(meta).__name__,
+                    )
+                    continue
+                filtered_meta = {
+                    k: v for k, v in meta.items()
+                    if k not in _YAML_EXCLUDED_FIELDS
+                }
+                self._agents[key] = AgentMetadata(**filtered_meta)
         logger.debug("Загружено %d агентов из %s", len(data), path)
 
     # ── CRUD ──────────────────────────────────────────────────────
@@ -136,14 +151,11 @@ class AgentRegistry:
             )
         with self._lock:
             if agent_type in self._agents:
-                # dataclasses.replace: обновляем только agent_class,
-                # все остальные поля метаданных сохраняются автоматически.
                 self._agents[agent_type] = dc_replace(
                     self._agents[agent_type],
                     agent_class=agent_class,
                 )
             else:
-                # Автоматические метаданные для агентов без YAML-описания
                 self._agents[agent_type] = AgentMetadata(
                     name=agent_class.__name__,
                     description=f"Auto-registered: {agent_class.__name__}",

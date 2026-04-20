@@ -67,13 +67,19 @@ class LLMProvider(StrEnum):
 
 def make_metadata(data: Optional[Dict[str, Any]] = None) -> MappingProxyType:
     """
-    Создаёт иммутабельный MappingProxyType для AgentContext.metadata.
+    Создаёт иммутабельный MappingProxyType для AgentContext.metadata
+    и AgentResult.metadata.
 
     Использование:
         context = AgentContext(
             agent_id="run-001",
             task="event_generation",
             metadata=make_metadata({"ticker": "AAPL", "year": 2021}),
+        )
+
+        result = AgentResult(
+            success=True,
+            metadata=make_metadata({"agent_class": "MyAgent"}),
         )
 
     Args:
@@ -83,6 +89,38 @@ def make_metadata(data: Optional[Dict[str, Any]] = None) -> MappingProxyType:
         MappingProxyType — read-only view, попытка записи бросает TypeError.
     """
     return MappingProxyType(data or {})
+
+
+def merge_metadata(
+    base: Mapping[str, Any],
+    *updates: Optional[Dict[str, Any]],
+) -> MappingProxyType:
+    """
+    Мерджит несколько dict'ов в новый иммутабельный MappingProxyType.
+
+    Используется в AgentLifecycle.finalize() и ErrorMapper.handle()
+    для добавления agent_class и extra_metadata к существующей metadata
+    без мутации оригинала.
+
+    Args:
+        base: базовая mapping (например result.metadata)
+        *updates: дополнительные dict'ы (None пропускается)
+
+    Returns:
+        Новый MappingProxyType со всеми слитыми данными.
+
+    Пример:
+        merged = merge_metadata(
+            result.metadata,
+            {"agent_class": "MyAgent"},
+            extra_metadata,
+        )
+    """
+    merged: Dict[str, Any] = dict(base)
+    for update in updates:
+        if update:
+            merged.update(update)
+    return MappingProxyType(merged)
 
 
 # ─────────────────────────── Configs ──────────────────────────────
@@ -196,7 +234,22 @@ class FinancialAgentContext(AgentContext):
 
 @dataclass(frozen=True)
 class AgentResult:
-    """Результат работы агента."""
+    """
+    Результат работы агента.
+
+    metadata — иммутабельный MappingProxyType:
+        - попытка записи бросает TypeError (реальная защита)
+        - создавайте через make_metadata({"key": "value"})
+        - или передавайте обычный dict — он будет автоматически обёрнут в __post_init__
+        - для слияния используйте merge_metadata(result.metadata, {"new_key": "val"})
+
+    Пример:
+        result = AgentResult(
+            success=True,
+            data={"reason_short": "..."},
+            metadata=make_metadata({"agent_class": "EventGenerationAgent"}),
+        )
+    """
     success: bool
     data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
@@ -204,4 +257,11 @@ class AgentResult:
     llm_response: Optional[str] = None
     tokens_used: Optional[int] = None
     duration_ms: Optional[int] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: MappingProxyType = field(default_factory=lambda: MappingProxyType({}))
+
+    def __post_init__(self) -> None:
+        # Автоматически оборачиваем dict в MappingProxyType для удобства:
+        #   AgentResult(success=True, metadata={"agent_class": "MyAgent"})  — работает
+        #   AgentResult(success=True, metadata=make_metadata(...))           — тоже работает
+        if isinstance(self.metadata, dict):
+            object.__setattr__(self, "metadata", MappingProxyType(self.metadata))

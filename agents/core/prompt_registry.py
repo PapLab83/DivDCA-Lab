@@ -46,7 +46,6 @@ def _get_git_commit(short: bool = True) -> Optional[str]:
     """
     fmt = "--short" if short else ""
     cmd = ["git", "rev-parse", fmt, "HEAD"] if fmt else ["git", "rev-parse", "HEAD"]
-    # убираем пустые строки из команды
     cmd = [c for c in cmd if c]
     try:
         result = subprocess.run(
@@ -158,6 +157,10 @@ class PromptRegistry:
     Хранит историю всех зарегистрированных промптов.
     Позволяет получить текущий снимок и полную историю изменений.
 
+    Git-метаданные (commit, tag, branch) захватываются ОДИН РАЗ
+    при инициализации PromptRegistry — не при каждом record().
+    Это исключает N subprocess-вызовов при регистрации N промптов.
+
     Использование совместно с PromptManager:
         manager = PromptManager()
         registry = PromptRegistry()
@@ -172,11 +175,23 @@ class PromptRegistry:
     def __init__(self, capture_git: bool = True) -> None:
         """
         Args:
-            capture_git: захватывать Git-метаданные при записи.
+            capture_git: захватывать Git-метаданные при инициализации.
                 False полезен в тестах или CI без git.
         """
         self._capture_git = capture_git
         self._history: Dict[str, List[PromptSnapshot]] = {}
+        if capture_git:
+            self._git_commit: Optional[str] = _get_git_commit()
+            self._git_tag: Optional[str] = _get_git_tag()
+            self._git_branch: Optional[str] = _get_git_branch()
+            logger.debug(
+                "PromptRegistry: Git-состояние захвачено: commit=%s, tag=%s, branch=%s",
+                self._git_commit, self._git_tag, self._git_branch,
+            )
+        else:
+            self._git_commit = None
+            self._git_tag = None
+            self._git_branch = None
 
     # ── Запись ────────────────────────────────────────────────────
 
@@ -197,19 +212,15 @@ class PromptRegistry:
         Returns:
             Созданный PromptSnapshot
         """
-        git_commit = _get_git_commit() if self._capture_git else None
-        git_tag = _get_git_tag() if self._capture_git else None
-        git_branch = _get_git_branch() if self._capture_git else None
-
         sections_hash = self._hash_sections(sections)
 
         snapshot = PromptSnapshot(
             task=task,
             version=version,
             recorded_at=datetime.now(timezone.utc),
-            git_commit=git_commit,
-            git_tag=git_tag,
-            git_branch=git_branch,
+            git_commit=self._git_commit,
+            git_tag=self._git_tag,
+            git_branch=self._git_branch,
             sections_hash=sections_hash,
             sections_count=len(sections),
         )
@@ -319,5 +330,6 @@ class PromptRegistry:
         return (
             f"PromptRegistry("
             f"tasks={self.list_tasks()!r}, "
-            f"capture_git={self._capture_git!r})"
+            f"capture_git={self._capture_git!r}, "
+            f"commit={self._git_commit!r})"
         )
