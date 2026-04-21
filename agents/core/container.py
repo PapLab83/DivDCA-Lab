@@ -12,18 +12,20 @@ __all__ = [
 
 import logging
 from pathlib import Path
-from typing import Optional, cast
+from typing import Dict, Optional, Type, cast
 
 from agents.core.base_agent import (
     AgentConfig,
     CacheProtocol,
     LLMAdapterProtocol,
+    LLMProvider,
     PromptManagerProtocol,
 )
 from agents.core.agent_registry import AgentRegistry
 from agents.core.agent_validator import AgentValidator
 from agents.core.agent_factory import AgentFactory
 from agents.core.llm.adapter import LLMAdapter
+from agents.core.llm.engines.base_engine import BaseLLMEngine
 from agents.core.skills.cache import InMemoryCache
 from agents.core.prompt_manager import PromptManager
 
@@ -41,6 +43,20 @@ class Container:
     Собирает и связывает компоненты:
         config → cache → llm_adapter → prompt_manager
         registry → validator → factory(с defaults)
+
+    Добавление кастомного LLM-провайдера:
+        Передайте engine_registry с нужным провайдером.
+        Каждый Container полностью изолирован — разные экземпляры
+        могут использовать разные провайдеры без конфликтов.
+
+        Пример:
+            from agents.core.llm.engines.base_engine import BaseLLMEngine
+
+            class MyCustomEngine(BaseLLMEngine):
+                ...
+
+            engine_registry = {LLMProvider.CUSTOM: MyCustomEngine}
+            container = Container(config, engine_registry=engine_registry)
 
     Путь к промптам:
         Приоритет: config.prompts_path → дефолтный путь (agents/prompts/).
@@ -62,7 +78,29 @@ class Container:
             *,
             registry: Optional[AgentRegistry] = None,
             cache: Optional[CacheProtocol] = None,
+            engine_registry: Optional[Dict[LLMProvider, Type[BaseLLMEngine]]] = None,
     ) -> None:
+        """
+        Args:
+            config: конфигурация агента (провайдер, модель, кэш, промпты)
+            registry: опциональный AgentRegistry (для тестов или кастомной сборки)
+            cache: опциональный кэш (реализует CacheProtocol)
+            engine_registry: реестр LLM-движков для этого контейнера.
+                Рекомендуемый способ добавления кастомных провайдеров.
+                Каждый Container изолирован — разные контейнеры могут
+                использовать разные наборы провайдеров.
+
+                None → используются дефолтные провайдеры
+                    (OpenAI, Claude, Gemini, Mock).
+
+                Пример добавления провайдера:
+                    engine_registry = {LLMProvider.CUSTOM: MyEngine}
+                    container = Container(config, engine_registry=engine_registry)
+
+                Пример полного переопределения (для тестов):
+                    engine_registry = {LLMProvider.MOCK: MyTestEngine}
+                    container = Container(config, engine_registry=engine_registry)
+        """
         self._config = config
 
         # ── Cache ──
@@ -78,6 +116,7 @@ class Container:
             config=config.llm_config,
             api_config=config.api_config,
             cache=self._cache,
+            engine_registry=engine_registry,
         )
 
         # ── PromptManager ──
@@ -112,13 +151,15 @@ class Container:
 
         logger.info(
             "Container создан: provider=%s, model=%s, cache=%s, "
-            "prompts_path=%s, agents_total=%d, agents_bound=%d",
+            "prompts_path=%s, agents_total=%d, agents_bound=%d, "
+            "custom_engines=%s",
             config.llm_config.provider,
             config.llm_config.model,
             type(self._cache).__name__ if self._cache else "disabled",
             prompts_path,
             len(self._registry.list_agents()),
             len(self._registry.list_bound_agents()),
+            list(engine_registry.keys()) if engine_registry else "defaults",
         )
 
     # ── Свойства (read-only) ──

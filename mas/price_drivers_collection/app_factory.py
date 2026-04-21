@@ -7,15 +7,29 @@
 - переиспользовать в тестах и будущем API-слое
 - явно документировать какие агенты регистрируются
 
+Добавление нового LLM-провайдера:
+    from agents.core.llm.engines.base_engine import BaseLLMEngine
+    from agents.core.base_agent import LLMProvider
+
+    class MyEngine(BaseLLMEngine):
+        ...
+
+    container = build_app_container(
+        engine_registry={LLMProvider.CUSTOM: MyEngine}
+    )
+
 Использование:
     container = build_app_container()
     agent = build_event_generation_agent(container)
 """
 import logging
+from typing import Dict, Optional, Type
 
-from agents.config import build_container
+from agents.core.base_agent import LLMProvider
 from agents.core.base_agent import BaseAgent
 from agents.core.container import Container
+from agents.core.llm.engines.base_engine import BaseLLMEngine
+from agents.config import build_container
 from agents.tasks.event_generation.agent import EventGenerationAgent
 
 logger = logging.getLogger(__name__)
@@ -28,7 +42,9 @@ _AGENT_REGISTRY = {
 }
 
 
-def build_app_container() -> Container:
+def build_app_container(
+    engine_registry: Optional[Dict[LLMProvider, Type[BaseLLMEngine]]] = None,
+) -> Container:
     """
     Собирает DI-контейнер и регистрирует все агенты приложения.
 
@@ -36,10 +52,20 @@ def build_app_container() -> Container:
     run.py, тесты и будущий API-слой используют эту функцию
     вместо ручной сборки.
 
+    Args:
+        engine_registry: реестр LLM-движков для контейнера.
+            Используйте для добавления кастомных провайдеров.
+            None → используются дефолтные провайдеры.
+
+            Пример:
+                container = build_app_container(
+                    engine_registry={LLMProvider.CUSTOM: MyEngine}
+                )
+
     Returns:
         Готовый Container со всеми зарегистрированными агентами.
     """
-    container = build_container()
+    container = build_container(engine_registry=engine_registry)
 
     for agent_type, agent_class in _AGENT_REGISTRY.items():
         container.factory.register(agent_type, agent_class)

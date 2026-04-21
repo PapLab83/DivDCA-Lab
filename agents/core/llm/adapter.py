@@ -30,18 +30,6 @@ from agents.core.llm.exceptions import LLMTransientError
 
 logger = logging.getLogger(__name__)
 
-# ── Plugin registry (модульный уровень) ───────────────────────────
-#
-# Единственное место глобального состояния — явный opt-in для plugin pattern.
-# Регистрация нового провайдера глобально:
-#     LLMAdapter.register_engine_global(LLMProvider.CUSTOM, MyEngine)
-#
-# Новые экземпляры LLMAdapter копируют этот dict в свой instance-level registry.
-# Уже созданные экземпляры НЕ получают новый engine — только новые.
-#
-_PLUGIN_REGISTRY: Dict[LLMProvider, Type[BaseLLMEngine]] = {}
-_PLUGIN_REGISTRY_LOCK = threading.Lock()
-
 
 def _build_default_engine_registry() -> Dict[LLMProvider, Type[BaseLLMEngine]]:
     """
@@ -69,13 +57,19 @@ class LLMAdapter:
         - кэширование ответов (опционально)
         - подсчёт использованных токенов
 
-    Engine registry (два уровня):
-        1. Plugin-level: LLMAdapter.register_engine_global() — модульный dict.
-           Регистрирует провайдер для всех будущих экземпляров.
-           Используется для plugin-расширений.
-        2. Instance-level: передаётся через конструктор engine_registry=...
-           или собирается из дефолтов + plugin registry при создании.
-           Каждый экземпляр полностью изолирован — тесты не влияют друг на друга.
+    Engine registry (instance-level):
+        Каждый экземпляр LLMAdapter имеет собственный изолированный реестр движков.
+        Реестр передаётся через конструктор — нет глобального состояния.
+
+        Добавление провайдера через Container (рекомендуется):
+            engine_registry = {LLMProvider.CUSTOM: MyCustomEngine}
+            container = Container(config, engine_registry=engine_registry)
+
+        Добавление провайдера напрямую (для тестов):
+            adapter = LLMAdapter(config, engine_registry={LLMProvider.MOCK: MyMock})
+
+        Добавление провайдера к существующему экземпляру:
+            adapter.register_engine_local(LLMProvider.CUSTOM, MyCustomEngine)
     """
 
     def __init__(
@@ -90,9 +84,12 @@ class LLMAdapter:
             config: конфигурация LLM (провайдер, модель, температура)
             api_config: конфигурация API (ключ, base_url, retries)
             cache: опциональный кэш (реализует CacheProtocol)
-            engine_registry: опциональный реестр движков для этого экземпляра.
-                Если None — собирается из дефолтов + plugin registry.
-                Передайте явно в тестах для полной изоляции:
+            engine_registry: реестр движков для этого экземпляра.
+                Если None — используются дефолтные провайдеры
+                    (OpenAI, Claude, Gemini, Mock).
+                Если передан — используется как есть (копируется для изоляции).
+                Передайте для добавления кастомных провайдеров или
+                полного переопределения в тестах:
                     adapter = LLMAdapter(config, engine_registry={LLMProvider.MOCK: MyMock})
         """
         self.config = config
@@ -100,20 +97,13 @@ class LLMAdapter:
         self.cache = cache
 
         # Instance-level registry: полностью изолирован от других экземпляров.
-        #
-        # Приоритет сборки:
-        #   1. Явно переданный engine_registry (тесты, кастомные сборки)
-        #   2. Дефолты + зарегистрированные плагины (обычное использование)
-        #
-        # Копируем dict чтобы мутации этого экземпляра не влияли на другие.
+        # Нет глобального состояния — каждый экземпляр независим.
         if engine_registry is not None:
+            # Явно переданный registry — копируем для изоляции от мутаций снаружи
             self._engine_registry: Dict[LLMProvider, Type[BaseLLMEngine]] = dict(engine_registry)
         else:
-            # Дефолты + плагины: плагины перекрывают дефолты если совпадает ключ
-            registry = _build_default_engine_registry()
-            with _PLUGIN_REGISTRY_LOCK:
-                registry.update(_PLUGIN_REGISTRY)
-            self._engine_registry = registry
+            # Дефолтный registry — новый dict на каждый экземпляр
+            self._engine_registry = _build_default_engine_registry()
 
         self.engine: BaseLLMEngine = self._init_engine()
         self._tokens_used: int = 0
@@ -129,54 +119,7 @@ class LLMAdapter:
             self.api_config.retries,
         )
 
-    # ── Plugin registry (модульный уровень) ───────────────────────
-
-    @classmethod
-    def register_engine_global(
-        cls,
-        provider: LLMProvider,
-        engine_class: Type[BaseLLMEngine],
-    ) -> None:
-        """
-        Регистрирует новый engine глобально — для всех будущих экземпляров.
-
-        Plugin pattern: позволяет добавлять провайдеры без изменения кода адаптера.
-        Уже созданные экземпляры НЕ получают новый engine — только новые.
-
-        Глобальное состояние хранится в модульном _PLUGIN_REGISTRY,
-        не в class variable — изолировано от instance state.
-
-        Args:
-            provider: идентификатор провайдера
-            engine_class: класс engine (наследник BaseLLMEngine)
-
-        Пример:
-            LLMAdapter.register_engine_global(LLMProvider.CUSTOM, MyCustomEngine)
-            adapter = LLMAdapter(LLMConfig(provider="custom"))  # видит MyCustomEngine
-        """
-        if not issubclass(engine_class, BaseLLMEngine):
-            raise TypeError(
-                f"{engine_class.__name__} должен быть наследником BaseLLMEngine"
-            )
-        with _PLUGIN_REGISTRY_LOCK:
-            _PLUGIN_REGISTRY[provider] = engine_class
-        logger.info(
-            "LLMAdapter: глобально зарегистрирован engine %s для провайдера '%s'",
-            engine_class.__name__, provider,
-        )
-
-    # Обратная совместимость: старое имя register_engine → новое register_engine_global
-    @classmethod
-    def register_engine(
-        cls,
-        provider: LLMProvider,
-        engine_class: Type[BaseLLMEngine],
-    ) -> None:
-        """
-        Устаревший алиас для register_engine_global().
-        Оставлен для обратной совместимости.
-        """
-        cls.register_engine_global(provider, engine_class)
+    # ── Instance-level registry ───────────────────────────────────
 
     def register_engine_local(
         self,
@@ -205,11 +148,8 @@ class LLMAdapter:
 
     @classmethod
     def list_providers(cls) -> list:
-        """Список провайдеров: дефолты + зарегистрированные плагины."""
-        registry = _build_default_engine_registry()
-        with _PLUGIN_REGISTRY_LOCK:
-            registry.update(_PLUGIN_REGISTRY)
-        return list(registry.keys())
+        """Список дефолтных провайдеров."""
+        return list(_build_default_engine_registry().keys())
 
     # ── engine init ───────────────────────────────────────────────
 
@@ -224,7 +164,7 @@ class LLMAdapter:
             raise ValueError(
                 f"Неизвестный провайдер: {self.config.provider}. "
                 f"Доступные: {available}. "
-                f"Добавьте провайдер через LLMAdapter.register_engine_global()."
+                f"Добавьте провайдер через Container(engine_registry={{provider: EngineClass}})."
             )
 
         if self.config.provider == LLMProvider.MOCK:

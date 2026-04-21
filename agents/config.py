@@ -7,7 +7,7 @@
 import os
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional, Type
 
 from agents.core.base_agent import (
     AgentConfig,
@@ -17,6 +17,7 @@ from agents.core.base_agent import (
     LLMProvider,
 )
 from agents.core.container import Container
+from agents.core.llm.engines.base_engine import BaseLLMEngine
 
 
 logger = logging.getLogger(__name__)
@@ -211,6 +212,7 @@ def build_container(
     cache_enabled: bool = True,
     prompts_path: Optional[str] = None,
     config_path: str = "config.yaml",
+    engine_registry: Optional[Dict[LLMProvider, Type[BaseLLMEngine]]] = None,
 ) -> Container:
     """
     Собирает полный DI-контейнер.
@@ -224,6 +226,20 @@ def build_container(
         prompts_path: путь к директории с промптами (приоритет над ENV и YAML).
             None → читается из ENV PROMPTS_PATH → YAML prompts_path → дефолт пакета.
         config_path: путь к YAML-конфигу (default: config.yaml)
+        engine_registry: реестр LLM-движков для контейнера.
+            Рекомендуемый способ добавления кастомных провайдеров.
+            None → используются дефолтные провайдеры (OpenAI, Claude, Gemini, Mock).
+
+            Пример добавления провайдера:
+                from agents.core.llm.engines.base_engine import BaseLLMEngine
+
+                class MyCustomEngine(BaseLLMEngine):
+                    ...
+
+                container = build_container(
+                    provider="custom",
+                    engine_registry={LLMProvider.CUSTOM: MyCustomEngine},
+                )
 
     Использование:
         container = build_container(provider="openai")
@@ -246,4 +262,4 @@ def build_container(
         prompts_path=prompts_path,
         yaml_overrides=yaml_overrides,
     )
-    return Container(config)
+    return Container(config, engine_registry=engine_registry)
